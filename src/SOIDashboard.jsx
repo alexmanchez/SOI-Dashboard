@@ -2,75 +2,114 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import _ from 'lodash';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Area, AreaChart, ReferenceLine } from 'recharts';
-import { Upload, Shield, RefreshCw, AlertCircle, TrendingUp, TrendingDown, DollarSign, Layers, Search, Lock, CheckCircle2, ArrowLeft, FileSpreadsheet, Link2, Activity, Clock, Zap, Copy } from 'lucide-react';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, LineChart, Line, ReferenceLine, ReferenceArea } from 'recharts';
+import { Upload, RefreshCw, AlertCircle, Layers, Search, Lock, ArrowLeft, FileSpreadsheet, Activity, Plus, Settings, Download, Trash2, Users, Briefcase, Building2, ChevronDown, ChevronRight, Edit2, X, Check, Eye, EyeOff, TrendingUp } from 'lucide-react';
 
-const CA_BLUE = '#1A3B5C';
-const CA_SKY = '#EFF6FC';
-const CA_ACCENT = '#2E6CA6';
-const CA_GOLD = '#B8893A';
-const CA_GREEN = '#3E7A5C';
-const CA_RED = '#A63E3E';
-const CA_SLATE = '#4A5968';
+/* =============================================================================
+   CATENA — Crypto Portfolio Exposure Dashboard
+   ============================================================================= */
 
-const CHART_PALETTE = [CA_BLUE, CA_ACCENT, CA_GOLD, CA_GREEN, CA_SLATE, '#6B9BD1', '#C4A366', '#5E8B73', '#7A8A99', '#8FB3DB', '#3D5A7A', '#9A7438'];
+// --- Dark theme palette (Yahoo-Finance-adjacent, CA-tinted) --------------------
+const BG        = '#0B0F14';
+const PANEL     = '#111822';
+const PANEL_2   = '#161F2B';
+const BORDER    = '#22303F';
+const TEXT      = '#E6EDF3';
+const TEXT_DIM  = '#8B99A8';
+const TEXT_MUTE = '#5B6978';
+const ACCENT    = '#4A9EFF';   // CA blue, brightened for dark
+const ACCENT_2  = '#6BB6FF';
+const GREEN     = '#22C55E';
+const RED       = '#EF4444';
+const GOLD      = '#D4A54A';
+const VIOLET    = '#A78BFA';
 
-const FIELDS = {
-  positionName: { label: 'Position Name', required: true, synonyms: ['position name', 'position', 'name', 'asset', 'asset name', 'security', 'security name', 'holding', 'holdings', 'investment', 'investment name', 'company', 'company name', 'issuer', 'description', 'token name', 'instrument', 'portfolio company'] },
-  ticker: { label: 'Ticker / Symbol', required: false, synonyms: ['ticker', 'symbol', 'ticker/symbol', 'token', 'token symbol', 'cusip'] },
-  assetType: { label: 'Asset Type', required: false, synonyms: ['asset type', 'type', 'instrument type', 'security type', 'instrument', 'asset class', 'investment type', 'holding type'] },
-  sector: { label: 'Sector / Category', required: false, synonyms: ['sector', 'category', 'sector/category', 'industry', 'vertical', 'theme', 'classification', 'gics sector', 'sub-sector', 'sub sector', 'strategy'] },
-  quantity: { label: 'Quantity', required: false, synonyms: ['quantity', 'qty', 'shares', 'units', 'tokens', 'coins', 'position size', 'number of shares', '# shares', 'par', 'par value', 'principal', 'notional'] },
-  price: { label: 'Price (at SOI)', required: false, synonyms: ['price', 'unit price', 'price per share', 'mark', 'mark price', 'last price', 'nav per unit', 'price per unit', 'current price'] },
-  costBasis: { label: 'Cost Basis', required: false, synonyms: ['cost basis', 'cost', 'book value', 'invested capital', 'basis', 'acquisition cost', 'total cost', 'original cost', 'cost ($)', 'investment cost'] },
-  marketValue: { label: 'Market Value (at SOI)', required: true, synonyms: ['market value', 'mv', 'fair value', 'fv', 'value', 'nav contribution', 'current value', 'mkt value', 'market val', 'fmv', 'ending value', 'ending mv', 'ending market value', 'value ($)', 'gross market value', 'gross exposure', 'net asset value', 'nav', 'position value'] },
-  unrealizedPL: { label: 'Unrealized P&L (at SOI)', required: false, synonyms: ['unrealized gain/loss', 'unrealized p&l', 'unrealized pnl', 'unrealized gain (loss)', 'ugl', 'gain/loss', 'p&l', 'pnl', 'unrealized', 'unrealized profit', 'unrealized gain', 'u/g/l', 'gain loss'] },
-  pctNav: { label: '% of NAV', required: false, synonyms: ['% of nav', 'pct of nav', '% nav', 'percent of nav', 'weight', '% of portfolio', 'portfolio %', 'allocation', 'pct', '% weight', '% of total', 'portfolio weight', '% of aum', '% of fund'] },
-  acquisitionDate: { label: 'Acquisition Date', required: false, synonyms: ['acquisition date', 'date', 'purchase date', 'entry date', 'invested date', 'buy date', 'date acquired', 'initial investment date', 'trade date'] },
-  liquidity: { label: 'Liquidity', required: false, synonyms: ['liquidity', 'liquidity tier', 'lockup', 'vesting', 'liquid/locked', 'liquid', 'liquidity profile', 'lock-up'] },
+// GICS-style 5-bucket taxonomy (pinned — don't add buckets casually)
+const SECTORS = [
+  { id: 'infrastructure', label: 'Infrastructure',     color: ACCENT,  desc: 'L1s, L2s, scaling, execution layers' },
+  { id: 'defi',           label: 'DeFi',               color: GREEN,   desc: 'Lending, DEXes, perps, stablecoin protocols' },
+  { id: 'middleware',     label: 'Middleware',         color: VIOLET,  desc: 'Oracles, restaking, data, compute, identity' },
+  { id: 'applications',   label: 'Applications',       color: GOLD,    desc: 'Consumer, gaming, social, AI agents' },
+  { id: 'stablecoins',    label: 'Stablecoins & Cash', color: TEXT_DIM, desc: 'USDC, USDT, DAI, cash' },
+];
+const SECTOR_BY_ID = Object.fromEntries(SECTORS.map(s => [s.id, s]));
+const UNCLASSIFIED = { id: 'unclassified', label: 'Unclassified', color: '#6B7280' };
+const sectorOf = (id) => SECTOR_BY_ID[id] || UNCLASSIFIED;
+
+// Canonical token → sector map (seed; user can override in Settings)
+const DEFAULT_TOKEN_SECTOR = {
+  'BTC': 'infrastructure', 'ETH': 'infrastructure', 'SOL': 'infrastructure',
+  'SUI': 'infrastructure', 'APT': 'infrastructure', 'SEI': 'infrastructure',
+  'TIA': 'infrastructure', 'NEAR': 'infrastructure', 'AVAX': 'infrastructure',
+  'ARB': 'infrastructure', 'OP': 'infrastructure', 'STRK': 'infrastructure',
+  'MATIC': 'infrastructure', 'POL': 'infrastructure', 'BERA': 'infrastructure',
+  'MNT': 'infrastructure', 'MOVE': 'infrastructure', 'INJ': 'infrastructure',
+  // DeFi
+  'UNI': 'defi', 'AAVE': 'defi', 'MKR': 'defi', 'COMP': 'defi', 'CRV': 'defi',
+  'LDO': 'defi', 'PENDLE': 'defi', 'GMX': 'defi', 'DYDX': 'defi', 'HYPE': 'defi',
+  'ONDO': 'defi', 'ENA': 'defi', 'MORPHO': 'defi', 'JUP': 'defi',
+  // Middleware
+  'LINK': 'middleware', 'EIGEN': 'middleware', 'RENDER': 'middleware', 'RNDR': 'middleware',
+  'FIL': 'middleware', 'GRT': 'middleware', 'AR': 'middleware', 'ATH': 'middleware',
+  'ETHFI': 'middleware', 'REZ': 'middleware', 'KMNO': 'middleware',
+  // Applications
+  'IMX': 'applications', 'RON': 'applications', 'FET': 'applications',
+  'TAO': 'applications', 'WLD': 'applications', 'ICP': 'applications',
+  'PRIME': 'applications', 'GAME': 'applications',
+  // Stablecoins & cash
+  'USDC': 'stablecoins', 'USDT': 'stablecoins', 'DAI': 'stablecoins',
+  'FRAX': 'stablecoins', 'USDE': 'stablecoins', 'PYUSD': 'stablecoins', 'USD': 'stablecoins',
 };
 
-const REQUIRED_FOR_DASHBOARD = ['positionName', 'marketValue'];
+// Time range pills
+const RANGES = [
+  { id: '1D',  label: '1D',  days: 1 },
+  { id: 'MTD', label: 'MTD', days: null }, // computed
+  { id: 'YTD', label: 'YTD', days: null },
+  { id: '1Y',  label: '1Y',  days: 365 },
+  { id: 'SI',  label: 'SI',  days: null }, // since inception
+];
+
+// --- Parsing helpers (preserved from v1) -------------------------------------
+const FIELDS = {
+  positionName:   { label: 'Position Name',          required: true,  synonyms: ['position name','position','name','asset','asset name','security','security name','holding','holdings','investment','investment name','company','company name','issuer','description','token name','instrument','portfolio company'] },
+  ticker:         { label: 'Ticker / Symbol',        required: false, synonyms: ['ticker','symbol','ticker/symbol','token','token symbol','cusip'] },
+  assetType:      { label: 'Asset Type',             required: false, synonyms: ['asset type','type','instrument type','security type','instrument','asset class','investment type','holding type'] },
+  sector:         { label: 'Sector / Category',      required: false, synonyms: ['sector','category','sector/category','industry','vertical','theme','classification','gics sector','sub-sector','sub sector','strategy'] },
+  quantity:       { label: 'Quantity',               required: false, synonyms: ['quantity','qty','shares','units','tokens','coins','position size','number of shares','# shares','par','par value','principal','notional'] },
+  price:          { label: 'Price (at SOI)',         required: false, synonyms: ['price','unit price','price per share','mark','mark price','last price','nav per unit','price per unit','current price'] },
+  costBasis:      { label: 'Cost Basis',             required: false, synonyms: ['cost basis','cost','book value','invested capital','basis','acquisition cost','total cost','original cost','cost ($)','investment cost'] },
+  marketValue:    { label: 'Market Value (at SOI)',  required: true,  synonyms: ['market value','mv','fair value','fv','value','nav contribution','current value','mkt value','market val','fmv','ending value','ending mv','ending market value','value ($)','gross market value','gross exposure','net asset value','nav','position value'] },
+  unrealizedPL:   { label: 'Unrealized P&L',         required: false, synonyms: ['unrealized gain/loss','unrealized p&l','unrealized pnl','unrealized gain (loss)','ugl','gain/loss','p&l','pnl','unrealized','unrealized profit','unrealized gain','u/g/l','gain loss'] },
+  pctNav:         { label: '% of NAV',               required: false, synonyms: ['% of nav','pct of nav','% nav','percent of nav','weight','% of portfolio','portfolio %','allocation','pct','% weight','% of total','portfolio weight','% of aum','% of fund'] },
+  acquisitionDate:{ label: 'Acquisition Date',       required: false, synonyms: ['acquisition date','date','purchase date','entry date','invested date','buy date','date acquired','initial investment date','trade date'] },
+  liquidity:      { label: 'Liquidity',              required: false, synonyms: ['liquidity','liquidity tier','lockup','vesting','liquid/locked','liquid','liquidity profile','lock-up'] },
+};
 const SUBTOTAL_PATTERNS = /^(total|subtotal|sub-total|grand total|sum|net total|fund total|portfolio total|aggregate)/i;
 
-const CHAINS = [
-  { id: 'ethereum', label: 'Ethereum', gt: 'eth' },
-  { id: 'solana', label: 'Solana', gt: 'solana' },
-  { id: 'base', label: 'Base', gt: 'base' },
-  { id: 'arbitrum', label: 'Arbitrum', gt: 'arbitrum' },
-  { id: 'optimism', label: 'Optimism', gt: 'optimism' },
-  { id: 'polygon', label: 'Polygon', gt: 'polygon_pos' },
-  { id: 'bsc', label: 'BNB Chain', gt: 'bsc' },
-  { id: 'avalanche', label: 'Avalanche', gt: 'avax' },
-  { id: 'blast', label: 'Blast', gt: 'blast' },
-  { id: 'sui', label: 'Sui', gt: 'sui-network' },
-  { id: 'aptos', label: 'Aptos', gt: 'aptos' },
-  { id: 'sei', label: 'Sei', gt: 'sei-v2' },
-  { id: 'berachain', label: 'Berachain', gt: 'berachain' },
-];
-const gtChainFor = (dsChain) => CHAINS.find(c => c.id === dsChain)?.gt || dsChain;
-
-const TOKEN_PRESETS = {
-  'bitcoin': { isCex: true, symbol: 'BTC' },
-  'btc': { isCex: true, symbol: 'BTC' },
-  'ethereum': { chain: 'ethereum', address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', symbol: 'WETH' },
-  'eth': { chain: 'ethereum', address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', symbol: 'WETH' },
-  'weth': { chain: 'ethereum', address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', symbol: 'WETH' },
-  'solana': { chain: 'solana', address: 'So11111111111111111111111111111111111111112', symbol: 'SOL' },
-  'sol': { chain: 'solana', address: 'So11111111111111111111111111111111111111112', symbol: 'SOL' },
-  'usdc': { chain: 'ethereum', address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC' },
-  'usdt': { chain: 'ethereum', address: '0xdac17f958d2ee523a2206206994597c13d831ec7', symbol: 'USDT' },
-  'dai': { chain: 'ethereum', address: '0x6b175474e89094c44da98b954eedeac495271d0f', symbol: 'DAI' },
-};
-
-const DS_BASE = 'https://api.coingecko.com/api/v3';
-const GT_BASE = 'https://api.coingecko.com/api/v3/onchain';
-
 const normalize = (s) => String(s ?? '').toLowerCase().trim().replace(/[_\-\/]/g, ' ').replace(/[()]/g, '').replace(/\s+/g, ' ');
-
+const parseNum = (v) => {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  let s = String(v).trim();
+  if (!s || s === '-' || s === '–' || s === 'N/A' || s === 'n/a') return null;
+  const isNegParen = /^\(.+\)$/.test(s);
+  s = s.replace(/[$,%\s€£¥]/g, '').replace(/[()]/g, '');
+  const n = parseFloat(s);
+  if (isNaN(n)) return null;
+  return isNegParen ? -n : n;
+};
+const parseDate = (v) => {
+  if (!v) return null;
+  if (v instanceof Date && !isNaN(v)) return v;
+  if (typeof v === 'number' && v > 10000 && v < 60000) {
+    const ms = (v - 25569) * 86400 * 1000;
+    const d = new Date(ms); return isNaN(d) ? null : d;
+  }
+  const d = new Date(v); return isNaN(d) ? null : d;
+};
 const matchScore = (header, candidates) => {
-  const n = normalize(header);
-  if (!n) return 0;
+  const n = normalize(header); if (!n) return 0;
   let best = 0;
   for (const c of candidates) {
     if (n === c) best = Math.max(best, 100);
@@ -81,7 +120,6 @@ const matchScore = (header, candidates) => {
   }
   return best;
 };
-
 const autoMapColumns = (headers) => {
   const mapping = {}; const scores = {}; const used = new Set();
   const candidates = [];
@@ -98,29 +136,6 @@ const autoMapColumns = (headers) => {
   }
   return { mapping, scores };
 };
-
-const parseNum = (v) => {
-  if (v === null || v === undefined || v === '') return null;
-  if (typeof v === 'number') return isNaN(v) ? null : v;
-  let s = String(v).trim();
-  if (!s || s === '-' || s === '–' || s === 'N/A' || s === 'n/a') return null;
-  const isNegParen = /^\(.+\)$/.test(s);
-  s = s.replace(/[$,%\s€£¥]/g, '').replace(/[()]/g, '');
-  const n = parseFloat(s);
-  if (isNaN(n)) return null;
-  return isNegParen ? -n : n;
-};
-
-const parseDate = (v) => {
-  if (!v) return null;
-  if (v instanceof Date && !isNaN(v)) return v;
-  if (typeof v === 'number' && v > 10000 && v < 60000) {
-    const ms = (v - 25569) * 86400 * 1000;
-    const d = new Date(ms); return isNaN(d) ? null : d;
-  }
-  const d = new Date(v); return isNaN(d) ? null : d;
-};
-
 const detectHeaderRow = (rows) => {
   const allSynonyms = Object.values(FIELDS).flatMap(f => f.synonyms);
   const limit = Math.min(25, rows.length);
@@ -139,44 +154,1998 @@ const detectHeaderRow = (rows) => {
   }
   return bestRow;
 };
-
 const dedupeHeaders = (headers) => {
   const seen = {};
   return headers.map((h, i) => {
     const base = h && String(h).trim() ? String(h).trim() : `Column ${i + 1}`;
     if (seen[base] === undefined) { seen[base] = 0; return base; }
-    seen[base]++;
-    return `${base} (${seen[base]})`;
+    seen[base]++; return `${base} (${seen[base]})`;
   });
 };
 
-const isContractAddress = (s) => {
-  if (!s) return false;
-  const t = String(s).trim();
-  if (/^0x[a-fA-F0-9]{40}$/.test(t)) return 'evm';
-  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t) && !t.startsWith('0x')) return 'solana';
-  return false;
-};
-
-const fmtCurrency = (v) => {
+// --- Format helpers -----------------------------------------------------------
+const fmtCurrency = (v, digits) => {
   if (v === null || v === undefined || isNaN(v)) return '–';
   const abs = Math.abs(v);
-  if (abs >= 1e9) return `${v < 0 ? '-' : ''}$${(abs / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${v < 0 ? '-' : ''}$${(abs / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `${v < 0 ? '-' : ''}$${(abs / 1e3).toFixed(1)}K`;
-  return `${v < 0 ? '-' : ''}$${abs.toFixed(0)}`;
+  const sign = v < 0 ? '-' : '';
+  const d = digits !== undefined ? digits : (abs >= 1e6 ? 2 : abs >= 1e3 ? 1 : 0);
+  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(d)}B`;
+  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(d)}M`;
+  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(d)}K`;
+  return `${sign}$${abs.toFixed(d)}`;
 };
-const fmtPct = (v) => (v === null || v === undefined || isNaN(v)) ? '–' : `${v.toFixed(2)}%`;
-const daysBetween = (a, b) => Math.max(0, Math.round((b - a) / 86400000));
-const shortAddr = (a) => !a ? '' : `${a.slice(0, 6)}…${a.slice(-4)}`;
+const fmtPct = (v, d=2) => (v === null || v === undefined || isNaN(v)) ? '–' : `${v.toFixed(d)}%`;
+const fmtPctSigned = (v, d=2) => {
+  if (v === null || v === undefined || isNaN(v)) return '–';
+  const sign = v > 0 ? '+' : '';
+  return `${sign}${v.toFixed(d)}%`;
+};
+const uid = () => Math.random().toString(36).slice(2, 10);
+const today = () => new Date().toISOString().slice(0,10);
 
-const STAGES = { UPLOAD: 'upload', SHEET_PICK: 'sheet_pick', MAP: 'map', TOKENS: 'tokens', DASHBOARD: 'dashboard' };
+/* =============================================================================
+   DATA MODEL
+   ---------
+   Store shape:
+   {
+     clients:   [{id, name, notes}]
+     managers:  [{id, name, firm}]                 (e.g., "Meridian Digital Capital IV")
+     soIs:      [{id, managerId, vintage, asOfDate, notes,
+                  positions: [ {id, positionName, ticker, quantity, soiPrice,
+                               costBasis, soiMarketValue, acquisitionDate, assetType,
+                               sectorId,          // our canonical GICS bucket
+                               forceLiquid,       // user flipped "mark as liquid after TGE"
+                               cgTokenId,         // optional: resolved CoinGecko coin id for live price
+                               chain, address,    // optional: onchain identity
+                               notes} ] }]
+     commitments: [{id, clientId, managerId, soiId, committed, called}]
+       // one client can commit to a manager/vintage. commitment data drives the
+       // rollup: positions inside soi are scaled to the commitment's "called" value
+       // implicitly (we treat the SOI's MV total as the called NAV for v1).
+     sectorOverrides: { [symbolUpper]: sectorId }
+     settings:  { cgApiKey, useLivePrices, lastRefresh }
+   }
+   ============================================================================= */
 
+const STORE_KEY = 'catena.store.v1';
+const emptyStore = () => ({
+  clients: [], managers: [], soIs: [], commitments: [],
+  sectorOverrides: {}, settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null },
+});
+
+const loadStore = () => {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Basic shape validation
+    if (!parsed.clients || !parsed.managers || !parsed.soIs || !parsed.commitments) return null;
+    // Rehydrate dates
+    for (const soi of parsed.soIs) {
+      if (soi.asOfDate && typeof soi.asOfDate === 'string') soi.asOfDate = soi.asOfDate;
+      for (const p of soi.positions || []) {
+        if (p.acquisitionDate && typeof p.acquisitionDate === 'string') {
+          // keep as ISO string; parse on demand
+        }
+      }
+    }
+    return { ...emptyStore(), ...parsed, settings: { ...emptyStore().settings, ...(parsed.settings || {}) } };
+  } catch { return null; }
+};
+const saveStore = (store) => {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch {}
+};
+
+/* =============================================================================
+   SEED DATA — 1 client, 2 managers, 4 vintages, realistic overlap
+   ============================================================================= */
+const seedStore = () => {
+  const clientId = uid();
+  const fwId = uid(), hackId = uid();
+  const fw3Id = uid(), fw4Id = uid(), hack1Id = uid(), hack2Id = uid();
+
+  const mkPos = (name, ticker, qty, price, mv, sectorId, date, opts={}) => ({
+    id: uid(),
+    positionName: name,
+    ticker,
+    quantity: qty,
+    soiPrice: price,
+    costBasis: opts.cost ?? null,
+    soiMarketValue: mv,
+    acquisitionDate: date,
+    assetType: opts.assetType || (ticker ? 'Liquid Token' : 'SAFT'),
+    sectorId,
+    forceLiquid: opts.forceLiquid || false,
+    cgTokenId: opts.cgTokenId || null,
+    chain: opts.chain || null, address: opts.address || null,
+    notes: opts.notes || '',
+  });
+
+  // --- Meridian Digital Capital Fund III (2021 vintage, older book, more liquid) ---
+  const fw3Positions = [
+    mkPos('Ethereum',         'ETH',   8500,   2200,  18_700_000, 'infrastructure', '2021-05-15', { cost: 12_000_000, cgTokenId: 'ethereum' }),
+    mkPos('Solana',           'SOL',   220000, 28,    6_160_000,  'infrastructure', '2021-06-10', { cost: 1_500_000,  cgTokenId: 'solana' }),
+    mkPos('Uniswap',          'UNI',   450000, 6.2,   2_790_000,  'defi',           '2021-07-01', { cost: 3_200_000,  cgTokenId: 'uniswap' }),
+    mkPos('Chainlink',        'LINK',  280000, 14,    3_920_000,  'middleware',     '2021-04-20', { cost: 2_100_000,  cgTokenId: 'chainlink' }),
+    mkPos('Lido DAO',         'LDO',   1400000,1.8,   2_520_000,  'defi',           '2022-01-11', { cost: 3_800_000,  cgTokenId: 'lido-dao' }),
+    mkPos('Arbitrum',         'ARB',   3200000,0.75,  2_400_000,  'infrastructure', '2023-03-23', { cost: 2_200_000,  cgTokenId: 'arbitrum' }),
+    mkPos('Optimism',         'OP',    1800000,1.65,  2_970_000,  'infrastructure', '2022-05-31', { cost: 1_900_000,  cgTokenId: 'optimism' }),
+    mkPos('Aave',              'AAVE', 35000,  95,    3_325_000,  'defi',           '2021-09-14', { cost: 4_100_000,  cgTokenId: 'aave' }),
+    mkPos('Synthetix SAFT',   '',      0,      0,     1_500_000,  'defi',           '2021-08-02', { assetType: 'SAFT' }),
+    mkPos('Ocean Protocol',   'OCEAN', 5000000,0.55,  2_750_000,  'middleware',     '2021-11-03', { cost: 1_800_000,  cgTokenId: 'ocean-protocol' }),
+    mkPos('Axie Infinity',    'AXS',   180000, 6.8,   1_224_000,  'applications',   '2021-10-05', { cost: 4_200_000,  cgTokenId: 'axie-infinity' }),
+    mkPos('USDC',             'USDC',  2000000,1,     2_000_000,  'stablecoins',    '2022-12-01', { cgTokenId: 'usd-coin', forceLiquid: true }),
+  ];
+
+  // --- Meridian Digital Capital Fund IV (2023 vintage, newer, more SAFTs + modern tokens) ---
+  const fw4Positions = [
+    mkPos('Ethereum',          'ETH',  6200,    2800, 17_360_000, 'infrastructure', '2023-04-12', { cost: 15_500_000, cgTokenId: 'ethereum' }),
+    mkPos('Solana',            'SOL',  150000,  95,   14_250_000, 'infrastructure', '2023-02-20', { cost: 4_200_000,  cgTokenId: 'solana' }),
+    mkPos('EigenLayer',        'EIGEN',800000,  3.2,  2_560_000,  'middleware',     '2024-05-12', { cost: 2_100_000,  cgTokenId: 'eigenlayer' }),
+    mkPos('Hyperliquid',       'HYPE', 280000,  24,   6_720_000,  'defi',           '2024-11-29', { cost: 3_500_000,  cgTokenId: 'hyperliquid' }),
+    mkPos('Celestia',          'TIA',  400000,  5.8,  2_320_000,  'infrastructure', '2023-11-01', { cost: 3_800_000,  cgTokenId: 'celestia' }),
+    mkPos('Ondo Finance',      'ONDO', 2200000, 0.95, 2_090_000,  'defi',           '2024-01-18', { cost: 1_900_000,  cgTokenId: 'ondo-finance' }),
+    mkPos('Pendle',            'PENDLE',300000, 4.1,  1_230_000,  'defi',           '2023-07-22', { cost: 800_000,    cgTokenId: 'pendle' }),
+    mkPos('Jito',              'JTO',  600000,  3.2,  1_920_000,  'infrastructure', '2023-12-07', { cost: 1_500_000,  cgTokenId: 'jito-governance-token' }),
+    mkPos('Monad SAFT',        '',     0,       0,    3_500_000,  'infrastructure', '2024-02-15', { assetType: 'SAFT', notes: 'Locked; TGE est H2 2026' }),
+    mkPos('Berachain SAFT',    '',     0,       0,    2_800_000,  'infrastructure', '2024-06-01', { assetType: 'SAFT', notes: 'Liquid since TGE Feb 2025', forceLiquid: true, ticker: 'BERA', cgTokenId: 'berachain-bera' }),
+    mkPos('Movement SAFT',     '',     0,       0,    1_500_000,  'infrastructure', '2024-04-20', { assetType: 'SAFT' }),
+    mkPos('Story Protocol SAFT','',    0,       0,    1_800_000,  'applications',   '2024-08-10', { assetType: 'SAFT' }),
+    mkPos('USDC',              'USDC', 3000000, 1,    3_000_000,  'stablecoins',    '2024-01-01', { cgTokenId: 'usd-coin', forceLiquid: true }),
+  ];
+
+  // --- Helix Crypto Partners Fund I (2022 vintage) ---
+  const hack1Positions = [
+    mkPos('Ethereum',          'ETH',  3500,    1600, 5_600_000,  'infrastructure', '2022-06-20', { cost: 4_800_000, cgTokenId: 'ethereum' }),
+    mkPos('Solana',            'SOL',  80000,   22,   1_760_000,  'infrastructure', '2022-07-15', { cost: 3_200_000, cgTokenId: 'solana' }),
+    mkPos('Aptos',             'APT',  400000,  7.5,  3_000_000,  'infrastructure', '2022-10-18', { cost: 1_200_000, cgTokenId: 'aptos' }),
+    mkPos('Sui',               'SUI',  2800000, 1.1,  3_080_000,  'infrastructure', '2023-05-03', { cost: 1_500_000, cgTokenId: 'sui' }),
+    mkPos('EigenLayer',        'EIGEN',500000,  3.2,  1_600_000,  'middleware',     '2024-05-12', { cost: 1_400_000, cgTokenId: 'eigenlayer' }),
+    mkPos('Render',            'RENDER',200000, 5.2,  1_040_000,  'middleware',     '2022-11-25', { cost: 420_000,   cgTokenId: 'render-token' }),
+    mkPos('dYdX',              'DYDX', 800000,  1.2,  960_000,    'defi',           '2022-08-30', { cost: 2_400_000, cgTokenId: 'dydx-chain' }),
+    mkPos('Injective',         'INJ',  150000,  22,   3_300_000,  'infrastructure', '2023-01-14', { cost: 800_000,   cgTokenId: 'injective-protocol' }),
+    mkPos('Worldcoin',         'WLD',  400000,  2.8,  1_120_000,  'applications',   '2023-07-24', { cost: 1_000_000, cgTokenId: 'worldcoin-wld' }),
+    mkPos('Sei SAFT',          '',     0,       0,    900_000,    'infrastructure', '2022-09-12', { assetType: 'SAFT', notes: 'Liquid since TGE', forceLiquid: true, ticker: 'SEI', cgTokenId: 'sei-network' }),
+    mkPos('USDC',              'USDC', 1500000, 1,    1_500_000,  'stablecoins',    '2022-06-01', { cgTokenId: 'usd-coin', forceLiquid: true }),
+  ];
+
+  // --- Helix Crypto Partners Fund II (2024 vintage, AI + infra heavy) ---
+  const hack2Positions = [
+    mkPos('Ethereum',          'ETH',  4800,    3200, 15_360_000, 'infrastructure', '2024-02-05', { cost: 14_000_000, cgTokenId: 'ethereum' }),
+    mkPos('Solana',            'SOL',  95000,   135,  12_825_000, 'infrastructure', '2024-01-20', { cost: 8_500_000,  cgTokenId: 'solana' }),
+    mkPos('Hyperliquid',       'HYPE', 180000,  24,   4_320_000,  'defi',           '2024-11-29', { cost: 2_200_000,  cgTokenId: 'hyperliquid' }),
+    mkPos('EigenLayer',        'EIGEN',1200000, 3.2,  3_840_000,  'middleware',     '2024-05-12', { cost: 3_000_000,  cgTokenId: 'eigenlayer' }),
+    mkPos('Bittensor',         'TAO',  9000,    420,  3_780_000,  'applications',   '2024-03-11', { cost: 1_800_000,  cgTokenId: 'bittensor' }),
+    mkPos('Fetch.ai',          'FET',  2500000, 1.3,  3_250_000,  'applications',   '2024-04-02', { cost: 2_800_000,  cgTokenId: 'fetch-ai' }),
+    mkPos('Jupiter',           'JUP',  3500000, 0.92, 3_220_000,  'defi',           '2024-01-31', { cost: 2_500_000,  cgTokenId: 'jupiter-exchange-solana' }),
+    mkPos('Ethena',            'ENA',  5500000, 0.45, 2_475_000,  'defi',           '2024-04-02', { cost: 4_400_000,  cgTokenId: 'ethena' }),
+    mkPos('Celestia',          'TIA',  300000,  5.8,  1_740_000,  'infrastructure', '2024-01-15', { cost: 2_700_000,  cgTokenId: 'celestia' }),
+    mkPos('Monad SAFT',        '',     0,       0,    2_500_000,  'infrastructure', '2024-04-01', { assetType: 'SAFT', notes: 'Locked; TGE est H2 2026' }),
+    mkPos('Grass SAFT',        '',     0,       0,    1_200_000,  'middleware',     '2024-03-20', { assetType: 'SAFT', notes: 'Liquid since TGE', forceLiquid: true, ticker: 'GRASS', cgTokenId: 'grass-2' }),
+    mkPos('Story Protocol SAFT','',    0,       0,    1_500_000,  'applications',   '2024-08-10', { assetType: 'SAFT' }),
+    mkPos('USDC',              'USDC', 4000000, 1,    4_000_000,  'stablecoins',    '2024-01-01', { cgTokenId: 'usd-coin', forceLiquid: true }),
+  ];
+
+  const sumMV = (positions) => positions.reduce((s,p)=>s+(p.soiMarketValue||0), 0);
+
+  return {
+    clients: [{ id: clientId, name: 'Sample Client Portfolio', notes: 'Seed demo client — illustrative only. All manager names, positions, and values are fictional.' }],
+    managers: [
+      { id: fwId,   name: 'Meridian Digital Capital', firm: 'Meridian' },
+      { id: hackId, name: 'Helix Crypto Partners',    firm: 'Helix' },
+    ],
+    soIs: [
+      { id: fw3Id,   managerId: fwId,   vintage: 'Fund III', asOfDate: '2025-09-30', notes: '', positions: fw3Positions },
+      { id: fw4Id,   managerId: fwId,   vintage: 'Fund IV',  asOfDate: '2025-09-30', notes: '', positions: fw4Positions },
+      { id: hack1Id, managerId: hackId, vintage: 'Fund I',   asOfDate: '2025-09-30', notes: '', positions: hack1Positions },
+      { id: hack2Id, managerId: hackId, vintage: 'Fund II',  asOfDate: '2025-09-30', notes: '', positions: hack2Positions },
+    ],
+    commitments: [
+      { id: uid(), clientId, managerId: fwId,   soiId: fw3Id,   committed: 30_000_000, called: sumMV(fw3Positions) },
+      { id: uid(), clientId, managerId: fwId,   soiId: fw4Id,   committed: 50_000_000, called: sumMV(fw4Positions) },
+      { id: uid(), clientId, managerId: hackId, soiId: hack1Id, committed: 20_000_000, called: sumMV(hack1Positions) },
+      { id: uid(), clientId, managerId: hackId, soiId: hack2Id, committed: 40_000_000, called: sumMV(hack2Positions) },
+    ],
+    sectorOverrides: {},
+    settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null },
+  };
+};
+
+/* =============================================================================
+   ROLLUP ENGINE
+   Given a store and a selection scope, return aggregated positions + metrics.
+   Selection = { kind: 'all' | 'client' | 'manager' | 'soi', id? }
+   ============================================================================= */
+const getSelectedSOIs = (store, selection) => {
+  if (!selection || selection.kind === 'all') return store.soIs;
+  if (selection.kind === 'client') {
+    const soiIds = new Set(store.commitments.filter(c => c.clientId === selection.id).map(c => c.soiId));
+    return store.soIs.filter(s => soiIds.has(s.id));
+  }
+  if (selection.kind === 'manager') return store.soIs.filter(s => s.managerId === selection.id);
+  if (selection.kind === 'soi') return store.soIs.filter(s => s.id === selection.id);
+  return [];
+};
+
+const resolveSector = (position, overrides) => {
+  const sym = String(position.ticker || '').toUpperCase().trim();
+  if (sym && overrides[sym]) return overrides[sym];
+  if (position.sectorId) return position.sectorId;
+  if (sym && DEFAULT_TOKEN_SECTOR[sym]) return DEFAULT_TOKEN_SECTOR[sym];
+  return UNCLASSIFIED.id;
+};
+
+const isLiquid = (position) => {
+  // Tri-state override: 'liquid' | 'illiquid' | 'auto' (default)
+  if (position.liquidityOverride === 'liquid') return true;
+  if (position.liquidityOverride === 'illiquid') return false;
+  // Back-compat: old forceLiquid boolean flag
+  if (position.forceLiquid) return true;
+  if (position.assetType === 'SAFT' || position.assetType === 'Warrant' || position.assetType === 'SAFE') return false;
+  return !!(position.ticker && position.quantity > 0);
+};
+const liquidityOverrideOf = (position) => {
+  if (position.liquidityOverride) return position.liquidityOverride;
+  if (position.forceLiquid) return 'liquid';
+  return 'auto';
+};
+
+const computeRollup = (store, selection, livePrices) => {
+  const soIs = getSelectedSOIs(store, selection);
+  const managerById = Object.fromEntries(store.managers.map(m => [m.id, m]));
+
+  // Per-position enrichment
+  const enriched = [];
+  for (const soi of soIs) {
+    const manager = managerById[soi.managerId];
+    for (const p of soi.positions) {
+      const sectorId = resolveSector(p, store.sectorOverrides);
+      const liquid = isLiquid(p);
+      const live = p.cgTokenId && livePrices[p.cgTokenId];
+      const useLive = !!live && (liquid || p.forceLiquid);
+      const currentValue = useLive && p.quantity
+        ? p.quantity * live.usd
+        : p.soiMarketValue;
+      const change24h = useLive ? (live.change24h ?? null) : null;
+      enriched.push({
+        ...p,
+        sectorId,
+        liquid,
+        managerId: soi.managerId,
+        managerName: manager?.name || 'Unknown',
+        vintage: soi.vintage,
+        soiId: soi.id,
+        currentValue,
+        change24h,
+        hasLivePrice: useLive,
+        livePrice: useLive ? live.usd : null,
+      });
+    }
+  }
+
+  const totalNAV = _.sumBy(enriched, 'currentValue');
+  const soiNAV   = _.sumBy(enriched, 'soiMarketValue');
+  const liquidNAV = _.sumBy(enriched.filter(p => p.liquid), 'currentValue');
+  const illiquidNAV = _.sumBy(enriched.filter(p => !p.liquid), 'currentValue');
+
+  // Sector breakdown
+  const bySector = _.groupBy(enriched, 'sectorId');
+  const sectorBreakdown = Object.entries(bySector).map(([sid, items]) => {
+    const s = sectorOf(sid);
+    const value = _.sumBy(items, 'currentValue');
+    return {
+      id: sid,
+      label: s.label,
+      color: s.color,
+      value,
+      pct: totalNAV > 0 ? (value / totalNAV) * 100 : 0,
+      count: items.length,
+    };
+  });
+  // Ensure all 5 GICS buckets appear even if 0
+  for (const s of SECTORS) {
+    if (!sectorBreakdown.find(x => x.id === s.id)) {
+      sectorBreakdown.push({ id: s.id, label: s.label, color: s.color, value: 0, pct: 0, count: 0 });
+    }
+  }
+  const sectorOrder = [...SECTORS.map(s=>s.id), 'unclassified'];
+  sectorBreakdown.sort((a, b) => sectorOrder.indexOf(a.id) - sectorOrder.indexOf(b.id));
+
+  // Token rollup — aggregate positions that share a ticker across managers
+  const byToken = {};
+  for (const p of enriched) {
+    const key = (p.ticker && p.ticker.toUpperCase()) || p.positionName;
+    if (!byToken[key]) {
+      byToken[key] = {
+        key,
+        symbol: p.ticker || '',
+        name: p.positionName,
+        sectorId: p.sectorId,
+        value: 0, soiValue: 0, quantity: 0, cost: 0,
+        change24h: p.change24h, hasLivePrice: p.hasLivePrice, livePrice: p.livePrice,
+        managers: new Set(),
+        positions: [],
+        liquid: p.liquid, forceLiquid: p.forceLiquid,
+      };
+    }
+    const t = byToken[key];
+    t.value += p.currentValue || 0;
+    t.soiValue += p.soiMarketValue || 0;
+    t.quantity += p.quantity || 0;
+    t.cost += p.costBasis || 0;
+    t.managers.add(`${p.managerName} ${p.vintage}`);
+    t.positions.push(p);
+    if (p.hasLivePrice) { t.hasLivePrice = true; t.livePrice = p.livePrice; t.change24h = p.change24h; }
+    if (p.liquid) t.liquid = true;
+  }
+  const tokenRollup = Object.values(byToken).map(t => ({
+    ...t, managerCount: t.managers.size, managers: [...t.managers],
+    pct: totalNAV > 0 ? (t.value / totalNAV) * 100 : 0,
+  }));
+  tokenRollup.sort((a, b) => b.value - a.value);
+
+  // Concentration
+  const sortedByVal = [...tokenRollup];
+  const top10 = _.sumBy(sortedByVal.slice(0, 10), 'pct');
+  const top25 = _.sumBy(sortedByVal.slice(0, 25), 'pct');
+
+  // Manager breakdown
+  const byManager = _.groupBy(enriched, 'soiId');
+  const managerBreakdown = Object.entries(byManager).map(([soiId, items]) => {
+    const soi = soIs.find(s => s.id === soiId);
+    const manager = managerById[soi.managerId];
+    const value = _.sumBy(items, 'currentValue');
+    return {
+      soiId, managerId: soi.managerId, managerName: manager?.name, vintage: soi.vintage,
+      value, pct: totalNAV > 0 ? (value/totalNAV)*100 : 0,
+      positionCount: items.length,
+      asOfDate: soi.asOfDate,
+    };
+  }).sort((a,b) => b.value - a.value);
+
+  return {
+    soIs, positions: enriched, tokenRollup, sectorBreakdown, managerBreakdown,
+    totalNAV, soiNAV, liquidNAV, illiquidNAV,
+    liquidPct: totalNAV > 0 ? (liquidNAV/totalNAV)*100 : 0,
+    top10, top25,
+    positionCount: enriched.length,
+    managerCount: new Set(enriched.map(p=>p.managerId)).size,
+    soiCount: soIs.length,
+  };
+};
+
+/* =============================================================================
+   COINGECKO LIVE PRICES (by coin id, batch)
+   ============================================================================= */
+const CG_BASE = 'https://api.coingecko.com/api/v3';
+const fetchLivePrices = async (tokenIds, apiKey) => {
+  const ids = _.uniq(tokenIds).filter(Boolean);
+  if (!ids.length) return { prices: {}, error: null };
+  const withKey = (u) => apiKey ? u + (u.includes('?') ? '&' : '?') + `x_cg_demo_api_key=${encodeURIComponent(apiKey)}` : u;
+  const out = {};
+  const batches = _.chunk(ids, 100);
+  for (const batch of batches) {
+    try {
+      const url = `${CG_BASE}/simple/price?ids=${batch.join(',')}&vs_currencies=usd&include_24hr_change=true`;
+      const res = await fetch(withKey(url));
+      if (res.status === 401 || res.status === 403) return { prices: out, error: 'Invalid API key.' };
+      if (res.status === 429) return { prices: out, error: 'Rate limited (30 req/min on Demo).' };
+      if (!res.ok) return { prices: out, error: `CoinGecko returned ${res.status}.` };
+      const data = await res.json();
+      for (const [id, v] of Object.entries(data)) {
+        out[id] = { usd: v.usd, change24h: v.usd_24h_change ?? null };
+      }
+    } catch (e) {
+      return { prices: out, error: 'Network error.' };
+    }
+    await new Promise(r => setTimeout(r, 1200));
+  }
+  return { prices: out, error: null };
+};
+
+/* Historical prices: fetch up to N days of daily closes for a list of coin ids.
+   Returns { [coinId]: { [utcMidnightMs]: closePrice } }
+   Uses /coins/{id}/market_chart?vs_currency=usd&days=N&interval=daily
+   Rate-limited: ~2s between calls for Demo tier. */
+const fetchHistory = async (tokenIds, days, apiKey, onProgress) => {
+  const ids = _.uniq(tokenIds).filter(Boolean);
+  if (!ids.length) return { history: {}, error: null };
+  const withKey = (u) => apiKey ? u + (u.includes('?') ? '&' : '?') + `x_cg_demo_api_key=${encodeURIComponent(apiKey)}` : u;
+  const out = {};
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    try {
+      const url = `${CG_BASE}/coins/${id}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
+      const res = await fetch(withKey(url));
+      if (res.status === 401 || res.status === 403) return { history: out, error: 'Invalid API key.' };
+      if (res.status === 429) { await new Promise(r => setTimeout(r, 5000)); i--; continue; }
+      if (!res.ok) { onProgress?.(i + 1, ids.length, id, `HTTP ${res.status}`); continue; }
+      const data = await res.json();
+      const byDay = {};
+      for (const [ts, price] of (data.prices || [])) {
+        const dayKey = Math.floor(ts / 86400000) * 86400000;
+        byDay[dayKey] = price;
+      }
+      out[id] = byDay;
+      onProgress?.(i + 1, ids.length, id, null);
+    } catch (e) {
+      onProgress?.(i + 1, ids.length, id, 'network');
+    }
+    await new Promise(r => setTimeout(r, 2100));
+  }
+  return { history: out, error: null };
+};
+
+/* Build a NAV time series for a set of positions given priceHistory.
+   positions: [{quantity, soiMarketValue, acquisitionDate, cgTokenId, liquid}]
+   Returns [{date: ms, value: usd}] covering the requested range. */
+const buildNAVSeries = (positions, priceHistory, startMs, endMs) => {
+  const dayMs = 86400000;
+  const start = Math.floor(startMs / dayMs) * dayMs;
+  const end = Math.floor(endMs / dayMs) * dayMs;
+
+  // Pre-fill each token's daily price by forward-filling gaps
+  const filledByToken = {};
+  for (const p of positions) {
+    if (!p.cgTokenId || !p.liquid) continue;
+    if (filledByToken[p.cgTokenId]) continue;
+    const byDay = priceHistory[p.cgTokenId];
+    if (!byDay) continue;
+    const filled = {};
+    let last = null;
+    for (let d = start; d <= end; d += dayMs) {
+      if (byDay[d] !== undefined) last = byDay[d];
+      filled[d] = last;
+    }
+    filledByToken[p.cgTokenId] = filled;
+  }
+
+  const series = [];
+  for (let d = start; d <= end; d += dayMs) {
+    let total = 0;
+    for (const p of positions) {
+      // Respect acquisition date — don't count position before it was held
+      const acqMs = p.acquisitionDate ? new Date(p.acquisitionDate).getTime() : null;
+      const acqDay = acqMs ? Math.floor(acqMs / dayMs) * dayMs : null;
+      if (acqDay && d < acqDay) continue;
+
+      if (p.liquid && p.cgTokenId && p.quantity) {
+        const filled = filledByToken[p.cgTokenId];
+        const price = filled?.[d];
+        if (price != null) total += p.quantity * price;
+        else total += p.soiMarketValue; // fallback to mark
+      } else {
+        // Illiquid or unpriced — held at SOI marked value
+        total += p.soiMarketValue;
+      }
+    }
+    series.push({ date: d, value: total });
+  }
+  return series;
+};
+
+const rangeToStartMs = (rangeId, positions) => {
+  const now = Date.now();
+  const dayMs = 86400000;
+  if (rangeId === '1D') return now - dayMs;
+  if (rangeId === 'MTD') {
+    const d = new Date(); d.setUTCDate(1); d.setUTCHours(0,0,0,0);
+    return d.getTime();
+  }
+  if (rangeId === 'YTD') {
+    const d = new Date(); d.setUTCMonth(0, 1); d.setUTCHours(0,0,0,0);
+    return d.getTime();
+  }
+  if (rangeId === '1Y') return now - 365 * dayMs;
+  if (rangeId === 'SI') {
+    // Since earliest acquisition date in the selection
+    const dates = positions.map(p => p.acquisitionDate ? new Date(p.acquisitionDate).getTime() : null).filter(Boolean);
+    return dates.length ? Math.min(...dates) : (now - 365 * dayMs);
+  }
+  return now - 30 * dayMs;
+};
+const rangeToDays = (rangeId, positions) => {
+  const startMs = rangeToStartMs(rangeId, positions);
+  return Math.max(2, Math.ceil((Date.now() - startMs) / 86400000));
+};
+
+/* =============================================================================
+   SHARED UI PRIMITIVES
+   ============================================================================= */
+const Panel = ({ children, className='', style={}, ...rest }) => (
+  <div {...rest}
+    className={`rounded-lg ${className}`}
+    style={{ backgroundColor: PANEL, border: `1px solid ${BORDER}`, ...style }}>
+    {children}
+  </div>
+);
+
+const KPI = ({ label, value, sub, tone }) => {
+  const toneColor = tone === 'up' ? GREEN : tone === 'down' ? RED : TEXT;
+  return (
+    <Panel className="p-4">
+      <div className="text-[11px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>{label}</div>
+      <div className="text-2xl font-semibold mt-1" style={{ color: toneColor }}>{value}</div>
+      {sub && <div className="text-xs mt-1" style={{ color: TEXT_DIM }}>{sub}</div>}
+    </Panel>
+  );
+};
+
+const Pill = ({ active, onClick, children }) => (
+  <button
+    onClick={onClick}
+    className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+    style={{
+      color: active ? BG : TEXT_DIM,
+      backgroundColor: active ? ACCENT : 'transparent',
+      border: `1px solid ${active ? ACCENT : BORDER}`,
+    }}>
+    {children}
+  </button>
+);
+
+const Tab = ({ active, onClick, children, icon: Icon }) => (
+  <button onClick={onClick}
+    className="px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors"
+    style={{
+      color: active ? TEXT : TEXT_DIM,
+      borderBottom: `2px solid ${active ? ACCENT : 'transparent'}`,
+    }}>
+    {Icon && <Icon size={14} />}{children}
+  </button>
+);
+
+const SectorBadge = ({ sectorId, size='sm' }) => {
+  const s = sectorOf(sectorId);
+  const px = size === 'sm' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-xs';
+  return (
+    <span className={`rounded ${px} font-medium`}
+      style={{ backgroundColor: s.color + '22', color: s.color, border: `1px solid ${s.color}44` }}>
+      {s.label}
+    </span>
+  );
+};
+
+const LiquidityBadge = ({ liquid }) => (
+  <span className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+    style={{
+      backgroundColor: liquid ? GREEN + '22' : GOLD + '22',
+      color: liquid ? GREEN : GOLD,
+      border: `1px solid ${liquid ? GREEN+'44' : GOLD+'44'}`,
+    }}>
+    {liquid ? 'Liquid' : 'Illiquid'}
+  </span>
+);
+
+const ChangeCell = ({ value, format='pct' }) => {
+  if (value === null || value === undefined || isNaN(value)) return <span style={{color:TEXT_MUTE}}>–</span>;
+  const color = value >= 0 ? GREEN : RED;
+  const s = format === 'pct' ? fmtPctSigned(value) : (value >= 0 ? '+' : '') + fmtCurrency(value);
+  return <span style={{ color }}>{s}</span>;
+};
+
+/* =============================================================================
+   MAIN APP
+   ============================================================================= */
 export default function SOIDashboard() {
-  const [stage, setStage] = useState(STAGES.UPLOAD);
+  const [store, setStore] = useState(() => {
+    const loaded = loadStore();
+    if (loaded && (loaded.soIs.length || loaded.clients.length)) return loaded;
+    return seedStore();
+  });
+  useEffect(() => { saveStore(store); }, [store]);
+
+  // Top-level navigation: selection + tab
+  const [selection, setSelection] = useState(() => {
+    // Start scoped to the first client if one exists (most useful default)
+    const loaded = loadStore() || seedStore();
+    if (loaded.clients.length === 1) return { kind: 'client', id: loaded.clients[0].id };
+    if (loaded.clients.length > 1)   return { kind: 'all' };
+    return { kind: 'all' };
+  });
+  const [tab, setTab] = useState('overview'); // overview | managers | positions | settings
+  const [drilldownSoi, setDrilldownSoi] = useState(null); // when viewing a single SOI in depth
+  const [range, setRange] = useState('SI');
+
+  // Live prices (in-memory only; re-fetch on demand)
+  const [livePrices, setLivePrices] = useState({});
+  const [priceLoading, setPriceLoading] = useState(false);
+  const [priceError, setPriceError] = useState(null);
+
+  // Historical prices — keyed by cgTokenId → { [utcDayMs]: close }
+  // Stored by (tokenId, maxDaysFetched) so we don't re-fetch if we already have enough
+  const [priceHistory, setPriceHistory] = useState({});
+  const [historyFetched, setHistoryFetched] = useState({}); // { [tokenId]: daysFetched }
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyProgress, setHistoryProgress] = useState({ current: 0, total: 0, token: '' });
+
+  // Import wizard state
+  const [importOpen, setImportOpen] = useState(false);
+
+  // Settings drawer
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Update helpers
+  const updateStore = useCallback((mutator) => {
+    setStore(prev => {
+      const next = typeof mutator === 'function' ? mutator(prev) : mutator;
+      return next;
+    });
+  }, []);
+
+  // Collect all coingecko ids across store for refresh
+  const allCgIds = useMemo(() => {
+    const ids = new Set();
+    for (const soi of store.soIs) for (const p of soi.positions) if (p.cgTokenId) ids.add(p.cgTokenId);
+    return [...ids];
+  }, [store.soIs]);
+
+  const refreshPrices = useCallback(async () => {
+    if (!store.settings.cgApiKey) {
+      setPriceError('Add a CoinGecko Demo API key in Settings to enable live prices.');
+      return;
+    }
+    setPriceLoading(true); setPriceError(null);
+    const { prices, error } = await fetchLivePrices(allCgIds, store.settings.cgApiKey);
+    setLivePrices(prices);
+    if (error) setPriceError(error);
+    updateStore(s => ({ ...s, settings: { ...s.settings, lastRefresh: new Date().toISOString() } }));
+    setPriceLoading(false);
+  }, [allCgIds, store.settings.cgApiKey, updateStore]);
+
+  // Fetch historical price data for the given scope + days window.
+  // Skips tokens we already have sufficient history for.
+  const fetchHistoryFor = useCallback(async (tokenIds, daysNeeded) => {
+    if (!store.settings.cgApiKey) {
+      setPriceError('Add a CoinGecko Demo API key in Settings to load historical charts.');
+      return;
+    }
+    const ids = _.uniq(tokenIds).filter(Boolean);
+    const missing = ids.filter(id => (historyFetched[id] || 0) < daysNeeded);
+    if (!missing.length) return;
+
+    setHistoryLoading(true); setPriceError(null);
+    setHistoryProgress({ current: 0, total: missing.length, token: '' });
+    const { history, error } = await fetchHistory(
+      missing, daysNeeded, store.settings.cgApiKey,
+      (current, total, token) => setHistoryProgress({ current, total, token })
+    );
+    if (error) setPriceError(error);
+    setPriceHistory(prev => {
+      const merged = { ...prev };
+      for (const [id, byDay] of Object.entries(history)) {
+        merged[id] = { ...(merged[id] || {}), ...byDay };
+      }
+      return merged;
+    });
+    setHistoryFetched(prev => {
+      const next = { ...prev };
+      for (const id of missing) next[id] = Math.max(next[id] || 0, daysNeeded);
+      return next;
+    });
+    setHistoryLoading(false);
+    setHistoryProgress({ current: 0, total: 0, token: '' });
+  }, [store.settings.cgApiKey, historyFetched]);
+
+  // Rollup for current selection
+  const rollup = useMemo(() => computeRollup(store, selection, livePrices), [store, selection, livePrices]);
+
+  // Selection label
+  const selectionLabel = useMemo(() => {
+    if (selection.kind === 'all') return 'All Clients';
+    if (selection.kind === 'client') return store.clients.find(c => c.id === selection.id)?.name || 'Unknown client';
+    if (selection.kind === 'manager') return store.managers.find(m => m.id === selection.id)?.name || 'Unknown manager';
+    if (selection.kind === 'soi') {
+      const soi = store.soIs.find(s => s.id === selection.id);
+      const mgr = store.managers.find(m => m.id === soi?.managerId);
+      return `${mgr?.name || '?'} ${soi?.vintage || ''}`.trim();
+    }
+    return '';
+  }, [selection, store]);
+
+  const containerStyle = { minHeight: '100vh', backgroundColor: BG, color: TEXT, fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' };
+
+  return (
+    <div style={containerStyle}>
+      {/* ========= TOP BAR ========= */}
+      <div style={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: PANEL }}>
+        <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded flex items-center justify-center"
+                 style={{ backgroundColor: ACCENT, color: BG, fontWeight: 700, fontSize: 14 }}>C</div>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">Catena</div>
+              <div className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Portfolio Exposure</div>
+            </div>
+          </div>
+
+          {/* Portfolio selector */}
+          <div className="flex items-center gap-2 ml-6">
+            <PortfolioSelector
+              store={store}
+              selection={selection}
+              onChange={(sel) => { setSelection(sel); setDrilldownSoi(null); setTab('overview'); }}
+            />
+          </div>
+
+          <div className="flex-1" />
+
+          {/* Live price refresh */}
+          <div className="flex items-center gap-3">
+            {store.settings.lastRefresh && (
+              <div className="text-xs" style={{ color: TEXT_MUTE }}>
+                Prices: {new Date(store.settings.lastRefresh).toLocaleTimeString()}
+              </div>
+            )}
+            <button onClick={refreshPrices} disabled={priceLoading}
+              className="px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition-colors"
+              style={{ border: `1px solid ${BORDER}`, color: TEXT, backgroundColor: PANEL_2, opacity: priceLoading ? 0.6 : 1 }}>
+              <RefreshCw size={12} className={priceLoading ? 'animate-spin' : ''} />
+              {priceLoading ? 'Fetching…' : 'Refresh prices'}
+            </button>
+            <button onClick={() => setImportOpen(true)}
+              className="px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5"
+              style={{ backgroundColor: ACCENT, color: BG }}>
+              <Upload size={12}/> Import SOI
+            </button>
+            <button onClick={() => setSettingsOpen(true)}
+              className="p-1.5 rounded" style={{ color: TEXT_DIM }}>
+              <Settings size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* ========= TAB BAR ========= */}
+        <div className="max-w-[1600px] mx-auto px-6 flex items-center gap-1">
+          <Tab active={tab==='overview'}  onClick={()=>{setTab('overview'); setDrilldownSoi(null);}} icon={Activity}>Overview</Tab>
+          <Tab active={tab==='managers'}  onClick={()=>{setTab('managers'); setDrilldownSoi(null);}} icon={Briefcase}>Managers</Tab>
+          <Tab active={tab==='positions'} onClick={()=>{setTab('positions'); setDrilldownSoi(null);}} icon={Layers}>Positions</Tab>
+          <div className="flex-1" />
+          <div className="flex items-center gap-1.5 py-2">
+            {RANGES.map(r => (
+              <Pill key={r.id} active={range===r.id} onClick={()=>setRange(r.id)}>{r.label}</Pill>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ========= MAIN ========= */}
+      <div className="max-w-[1600px] mx-auto px-6 py-6">
+        {/* Selection summary line */}
+        <div className="flex items-baseline justify-between mb-6">
+          <div>
+            <div className="text-xs uppercase tracking-wider" style={{ color: TEXT_MUTE }}>
+              {selection.kind === 'all' ? 'Firm-wide rollup' :
+               selection.kind === 'client' ? 'Client portfolio' :
+               selection.kind === 'manager' ? 'Manager (all vintages)' : 'Single vintage'}
+            </div>
+            <h1 className="text-2xl font-semibold mt-0.5">{selectionLabel}</h1>
+          </div>
+          <div className="text-right">
+            <div className="text-xs uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Total exposure</div>
+            <div className="text-2xl font-semibold">{fmtCurrency(rollup.totalNAV)}</div>
+          </div>
+        </div>
+
+        {priceError && (
+          <Panel className="p-3 mb-4 flex items-center gap-2" style={{ borderColor: RED + '66', backgroundColor: RED + '11' }}>
+            <AlertCircle size={14} style={{ color: RED }} />
+            <span className="text-xs" style={{ color: RED }}>{priceError}</span>
+          </Panel>
+        )}
+
+        {rollup.positionCount === 0 && (
+          <Panel className="p-12 text-center">
+            <div className="text-sm" style={{ color: TEXT_DIM }}>No positions in this selection yet.</div>
+            <button onClick={() => setImportOpen(true)}
+              className="mt-4 px-4 py-2 rounded text-xs font-medium inline-flex items-center gap-1.5"
+              style={{ backgroundColor: ACCENT, color: BG }}>
+              <Upload size={12} /> Import an SOI
+            </button>
+          </Panel>
+        )}
+
+        {rollup.positionCount > 0 && tab === 'overview' && (
+          <OverviewTab rollup={rollup}
+            priceHistory={priceHistory} historyLoading={historyLoading} historyProgress={historyProgress}
+            range={range} onRangeChange={setRange} onRequestFetch={fetchHistoryFor}
+            apiKey={store.settings.cgApiKey} />
+        )}
+        {rollup.positionCount > 0 && tab === 'managers' && !drilldownSoi && (
+          <ManagersTab rollup={rollup} store={store} onDrill={(soiId) => setDrilldownSoi(soiId)}
+            priceHistory={priceHistory} range={range} apiKey={store.settings.cgApiKey} />
+        )}
+        {rollup.positionCount > 0 && tab === 'managers' && drilldownSoi && (
+          <SOIDetail
+            store={store}
+            soiId={drilldownSoi}
+            livePrices={livePrices}
+            onBack={() => setDrilldownSoi(null)}
+            updateStore={updateStore}
+            priceHistory={priceHistory}
+            historyLoading={historyLoading}
+            historyProgress={historyProgress}
+            range={range}
+            onRangeChange={setRange}
+            onRequestFetch={fetchHistoryFor}
+            apiKey={store.settings.cgApiKey}
+          />
+        )}
+        {rollup.positionCount > 0 && tab === 'positions' && (
+          <PositionsTab rollup={rollup} store={store} updateStore={updateStore} />
+        )}
+      </div>
+
+      {importOpen && (
+        <ImportWizard
+          store={store}
+          updateStore={updateStore}
+          onClose={() => setImportOpen(false)}
+          onDone={() => { setImportOpen(false); }}
+        />
+      )}
+
+      {settingsOpen && (
+        <SettingsDrawer
+          store={store}
+          updateStore={updateStore}
+          onClose={() => setSettingsOpen(false)}
+          onResetSeed={() => { const s = seedStore(); setStore(s); setLivePrices({}); setSelection({kind:'client', id:s.clients[0].id}); setSettingsOpen(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* =============================================================================
+   PORTFOLIO SELECTOR (dropdown)
+   ============================================================================= */
+function PortfolioSelector({ store, selection, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  const label = useMemo(() => {
+    if (selection.kind === 'all') return 'All Clients';
+    if (selection.kind === 'client') return store.clients.find(c=>c.id===selection.id)?.name || '—';
+    if (selection.kind === 'manager') return store.managers.find(m=>m.id===selection.id)?.name + ' (all)';
+    if (selection.kind === 'soi') {
+      const soi = store.soIs.find(s=>s.id===selection.id);
+      const mgr = store.managers.find(m=>m.id===soi?.managerId);
+      return `${mgr?.name || '?'} ${soi?.vintage || ''}`;
+    }
+    return '';
+  }, [selection, store]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={() => setOpen(!open)}
+        className="px-3 py-1.5 rounded text-sm font-medium flex items-center gap-2"
+        style={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, color: TEXT, minWidth: 220 }}>
+        <Briefcase size={14} style={{ color: ACCENT }} />
+        <span className="flex-1 text-left">{label}</span>
+        <ChevronDown size={14} style={{ color: TEXT_DIM }} />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 rounded-lg z-50"
+          style={{ backgroundColor: PANEL, border: `1px solid ${BORDER}`, minWidth: 280, boxShadow: '0 10px 30px rgba(0,0,0,0.4)' }}>
+          <div className="p-1">
+            <MenuItem
+              active={selection.kind==='all'}
+              onClick={() => { onChange({ kind: 'all' }); setOpen(false); }}
+              icon={<Users size={14} />}>
+              All Clients
+              <span className="ml-auto text-[10px]" style={{ color: TEXT_MUTE }}>
+                {store.soIs.length} SOIs
+              </span>
+            </MenuItem>
+          </div>
+          {store.clients.length > 0 && (
+            <>
+              <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Clients</div>
+              <div className="p-1">
+                {store.clients.map(c => {
+                  const soiCount = store.commitments.filter(x => x.clientId === c.id).length;
+                  return (
+                    <MenuItem key={c.id}
+                      active={selection.kind==='client' && selection.id===c.id}
+                      onClick={() => { onChange({ kind: 'client', id: c.id }); setOpen(false); }}
+                      icon={<Users size={14} />}>
+                      {c.name}
+                      <span className="ml-auto text-[10px]" style={{ color: TEXT_MUTE }}>{soiCount}</span>
+                    </MenuItem>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          {store.managers.length > 0 && (
+            <>
+              <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Managers</div>
+              <div className="p-1 pb-2">
+                {store.managers.map(m => {
+                  const vintages = store.soIs.filter(s => s.managerId === m.id);
+                  return (
+                    <div key={m.id}>
+                      <MenuItem
+                        active={selection.kind==='manager' && selection.id===m.id}
+                        onClick={() => { onChange({ kind: 'manager', id: m.id }); setOpen(false); }}
+                        icon={<Building2 size={14} />}>
+                        {m.name}
+                        <span className="ml-auto text-[10px]" style={{ color: TEXT_MUTE }}>{vintages.length}</span>
+                      </MenuItem>
+                      {vintages.map(v => (
+                        <MenuItem key={v.id} indent
+                          active={selection.kind==='soi' && selection.id===v.id}
+                          onClick={() => { onChange({ kind: 'soi', id: v.id }); setOpen(false); }}>
+                          <span style={{ color: TEXT_DIM }}>{v.vintage}</span>
+                        </MenuItem>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+function MenuItem({ active, onClick, children, icon, indent }) {
+  return (
+    <button onClick={onClick}
+      className="w-full px-2.5 py-1.5 rounded text-sm flex items-center gap-2 transition-colors"
+      style={{
+        backgroundColor: active ? ACCENT + '22' : 'transparent',
+        color: active ? ACCENT_2 : TEXT,
+        paddingLeft: indent ? 28 : undefined,
+      }}>
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+/* =============================================================================
+   PERFORMANCE CHART — Yahoo Finance-adjacent area chart
+   Props:
+     positions: enriched positions to include in the NAV series
+     priceHistory: { cgTokenId → { utcDayMs → price } }
+     historyLoading: bool
+     historyProgress: { current, total, token }
+     range: one of RANGES
+     onRangeChange, onRequestFetch(tokenIds, days): to trigger fetch on demand
+     apiKey: for gating UI
+     height, compact: style controls
+   ============================================================================= */
+function PerformanceChart({ positions, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, height=260, compact=false, title, asOfDate, asOfDates }) {
+  // Determine the days window needed for the current range
+  const tokenIds = useMemo(() => _.uniq(positions.filter(p => p.liquid && p.cgTokenId).map(p => p.cgTokenId)), [positions]);
+  const daysNeeded = useMemo(() => rangeToDays(range, positions), [range, positions]);
+
+  // Trigger fetch if we're missing data
+  const [hasTriggered, setHasTriggered] = useState(false);
+  useEffect(() => {
+    if (!apiKey || !tokenIds.length) return;
+    onRequestFetch?.(tokenIds, daysNeeded);
+    setHasTriggered(true);
+  }, [tokenIds.join(','), daysNeeded, apiKey]);
+
+  // Build series
+  const series = useMemo(() => {
+    if (!positions.length) return [];
+    const startMs = rangeToStartMs(range, positions);
+    const endMs = Date.now();
+    return buildNAVSeries(positions, priceHistory, startMs, endMs);
+  }, [positions, priceHistory, range]);
+
+  const startValue = series[0]?.value ?? 0;
+  const endValue = series[series.length - 1]?.value ?? 0;
+  const returnPct = startValue > 0 ? ((endValue - startValue) / startValue) * 100 : 0;
+  const positive = returnPct >= 0;
+  const lineColor = positive ? GREEN : RED;
+
+  const tokensCovered = tokenIds.filter(id => priceHistory[id]).length;
+  const needsData = apiKey && tokenIds.length > 0 && tokensCovered < tokenIds.length;
+
+  const yMin = useMemo(() => {
+    const vals = series.map(s => s.value).filter(v => v > 0);
+    if (!vals.length) return 0;
+    const min = Math.min(...vals), max = Math.max(...vals);
+    return Math.max(0, min - (max - min) * 0.1);
+  }, [series]);
+  const yMax = useMemo(() => {
+    const vals = series.map(s => s.value).filter(v => v > 0);
+    if (!vals.length) return 1;
+    const min = Math.min(...vals), max = Math.max(...vals);
+    return max + (max - min) * 0.1;
+  }, [series]);
+
+  // As-of marker computation
+  const asOfMs = useMemo(() => {
+    if (asOfDate) return new Date(asOfDate).getTime();
+    if (asOfDates && asOfDates.length) {
+      // For rolled-up views: the latest as-of date is the honest "everything is stale after this" marker
+      const times = asOfDates.filter(Boolean).map(d => new Date(d).getTime()).filter(n => !isNaN(n));
+      return times.length ? Math.max(...times) : null;
+    }
+    return null;
+  }, [asOfDate, asOfDates]);
+
+  const hasAsOfInRange = useMemo(() => {
+    if (!asOfMs || !series.length) return false;
+    return asOfMs >= series[0].date && asOfMs <= series[series.length - 1].date;
+  }, [asOfMs, series]);
+
+  return (
+    <Panel className={compact ? 'p-3' : 'p-5'}>
+      {!compact && (
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            {title && <div className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>{title}</div>}
+            <div className="flex items-baseline gap-3 mt-0.5">
+              <div className="text-xl font-semibold">{fmtCurrency(endValue)}</div>
+              <div className="text-sm font-medium" style={{color: positive ? GREEN : RED}}>
+                {positive ? '▲' : '▼'} {fmtPctSigned(returnPct, 2)}
+                <span className="ml-1" style={{color:TEXT_DIM}}>{range}</span>
+              </div>
+              {asOfMs && (
+                <div className="text-[10px] px-2 py-0.5 rounded" style={{color: GOLD, backgroundColor: GOLD+'11', border: `1px solid ${GOLD}44`}}>
+                  As of {new Date(asOfMs).toLocaleDateString([], {year:'numeric', month:'short', day:'numeric'})}
+                </div>
+              )}
+            </div>
+          </div>
+          {onRangeChange && (
+            <div className="flex items-center gap-1">
+              {RANGES.map(r => (
+                <Pill key={r.id} active={range===r.id} onClick={()=>onRangeChange(r.id)}>{r.label}</Pill>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!apiKey && (
+        <div className="flex items-center justify-center text-xs p-6 rounded"
+          style={{backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px dashed ${BORDER}`, height}}>
+          Add a CoinGecko API key in Settings to enable historical performance.
+        </div>
+      )}
+
+      {apiKey && historyLoading && (
+        <div className="flex flex-col items-center justify-center text-xs rounded gap-2"
+          style={{backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px dashed ${BORDER}`, height}}>
+          <RefreshCw size={16} className="animate-spin" style={{color:ACCENT}} />
+          <div>Fetching history {historyProgress.current}/{historyProgress.total} — {historyProgress.token}</div>
+          <div className="w-40 h-1 rounded-full overflow-hidden" style={{backgroundColor: BORDER}}>
+            <div className="h-full" style={{width: `${(historyProgress.current/Math.max(1,historyProgress.total))*100}%`, backgroundColor: ACCENT}} />
+          </div>
+          <div className="text-[10px]" style={{color:TEXT_MUTE}}>~2s per token on Demo tier</div>
+        </div>
+      )}
+
+      {apiKey && !historyLoading && needsData && (
+        <div className="flex items-center justify-center text-xs p-6 rounded"
+          style={{backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px dashed ${BORDER}`, height}}>
+          History not yet loaded for this range. Click "Refresh prices" to fetch.
+        </div>
+      )}
+
+      {apiKey && !historyLoading && !needsData && series.length > 0 && (
+        <div style={{width:'100%', height}}>
+          <ResponsiveContainer>
+            <AreaChart data={series} margin={{top: 8, right: 8, left: 0, bottom: 0}}>
+              <defs>
+                <linearGradient id={`grad-${positive?'up':'down'}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={lineColor} stopOpacity={0.35}/>
+                  <stop offset="100%" stopColor={lineColor} stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="date" tick={{fontSize: 10, fill: TEXT_MUTE}} axisLine={false} tickLine={false}
+                tickFormatter={(ms) => {
+                  const d = new Date(ms);
+                  if (range === '1D') return d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+                  if (range === 'MTD' || range === 'YTD') return d.toLocaleDateString([], {month: 'short', day: 'numeric'});
+                  return d.toLocaleDateString([], {month: 'short', year: '2-digit'});
+                }}
+                minTickGap={60} />
+              <YAxis domain={[yMin, yMax]} tick={{fontSize: 10, fill: TEXT_MUTE}} axisLine={false} tickLine={false}
+                tickFormatter={(v) => fmtCurrency(v, 0)} width={60} />
+              <Tooltip
+                contentStyle={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, borderRadius: 6, fontSize: 12}}
+                labelStyle={{color: TEXT_DIM}}
+                itemStyle={{color: TEXT}}
+                labelFormatter={(ms) => new Date(ms).toLocaleDateString([], {year:'numeric', month: 'short', day: 'numeric'})}
+                formatter={(v) => [fmtCurrency(v), 'NAV']} />
+              <Area type="monotone" dataKey="value" stroke={lineColor} strokeWidth={1.5}
+                fill={`url(#grad-${positive?'up':'down'})`} />
+              {hasAsOfInRange && (
+                <>
+                  <ReferenceArea x1={asOfMs} x2={series[series.length - 1].date}
+                    fill={GOLD} fillOpacity={0.06} stroke="none" />
+                  <ReferenceLine x={asOfMs} stroke={GOLD} strokeWidth={1} strokeDasharray="3 3"
+                    label={{ value: 'As of', position: 'top', fill: GOLD, fontSize: 10 }} />
+                </>
+              )}
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {apiKey && !historyLoading && !series.length && (
+        <div className="flex items-center justify-center text-xs p-6 rounded"
+          style={{backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px dashed ${BORDER}`, height}}>
+          No data in this range.
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function MiniSparkline({ series, width=120, height=32 }) {
+  if (!series?.length || series.length < 2) {
+    return <div style={{width, height}} />;
+  }
+  const vals = series.map(s => s.value);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const range = max - min || 1;
+  const positive = vals[vals.length - 1] >= vals[0];
+  const color = positive ? GREEN : RED;
+  const points = vals.map((v, i) => {
+    const x = (i / (vals.length - 1)) * width;
+    const y = height - ((v - min) / range) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return (
+    <svg width={width} height={height} style={{display:'block'}}>
+      <polyline fill="none" stroke={color} strokeWidth="1.25" points={points} />
+    </svg>
+  );
+}
+
+/* =============================================================================
+   OVERVIEW TAB — the headline view (sector tilts, top tokens, concentration)
+   ============================================================================= */
+function OverviewTab({ rollup, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey }) {
+  return (
+    <div className="space-y-6">
+      {/* PERFORMANCE CHART */}
+      <PerformanceChart
+        positions={rollup.positions}
+        priceHistory={priceHistory}
+        historyLoading={historyLoading}
+        historyProgress={historyProgress}
+        range={range}
+        onRangeChange={onRangeChange}
+        onRequestFetch={onRequestFetch}
+        apiKey={apiKey}
+        title="Portfolio performance"
+        height={280}
+        asOfDates={rollup.soIs.map(s => s.asOfDate)}
+      />
+
+      {/* KPI ROW */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KPI label="Total Exposure" value={fmtCurrency(rollup.totalNAV)}
+             sub={`${rollup.positionCount} positions in ${rollup.soiCount} SOI${rollup.soiCount===1?'':'s'}`} />
+        <KPI label="Managers" value={rollup.managerCount}
+             sub={`${rollup.soiCount} vintage${rollup.soiCount===1?'':'s'}`} />
+        <KPI label="Liquid / Illiquid" value={fmtPct(rollup.liquidPct, 1)}
+             sub={`${fmtCurrency(rollup.liquidNAV)} liquid • ${fmtCurrency(rollup.illiquidNAV)} illiquid`} />
+        <KPI label="Top-10 concentration" value={fmtPct(rollup.top10, 1)}
+             sub={`Top-25: ${fmtPct(rollup.top25, 1)}`} />
+      </div>
+
+      {/* SECTOR TILTS — the main event */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Panel className="p-5 lg:col-span-2">
+          <div className="flex items-baseline justify-between mb-3">
+            <div>
+              <div className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Sector tilt (GICS-style)</div>
+              <div className="text-base font-semibold mt-0.5">Exposure by bucket</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div style={{ width: '100%', height: 240 }}>
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie data={rollup.sectorBreakdown.filter(s => s.value > 0)}
+                    dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius={90} innerRadius={55}
+                    strokeWidth={0}>
+                    {rollup.sectorBreakdown.filter(s => s.value > 0).map((s, i) => (
+                      <Cell key={i} fill={s.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, borderRadius: 6, fontSize: 12 }}
+                    labelStyle={{ color: TEXT }}
+                    itemStyle={{ color: TEXT }}
+                    formatter={(v) => fmtCurrency(v)} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="space-y-2">
+              {rollup.sectorBreakdown.map(s => (
+                <div key={s.id} className="flex items-center gap-3">
+                  <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: s.color }} />
+                  <div className="flex-1">
+                    <div className="text-sm">{s.label}</div>
+                    <div className="h-1.5 rounded-full mt-1 overflow-hidden" style={{ backgroundColor: PANEL_2 }}>
+                      <div className="h-full" style={{ width: `${s.pct}%`, backgroundColor: s.color }} />
+                    </div>
+                  </div>
+                  <div className="text-right" style={{ minWidth: 100 }}>
+                    <div className="text-sm tabular-nums">{fmtCurrency(s.value)}</div>
+                    <div className="text-[10px] tabular-nums" style={{ color: TEXT_DIM }}>{fmtPct(s.pct,1)} • {s.count} pos</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Panel>
+
+        <Panel className="p-5">
+          <div className="text-xs uppercase tracking-wider mb-1" style={{color:TEXT_MUTE}}>Manager breakdown</div>
+          <div className="text-base font-semibold mb-4">Exposure by vintage</div>
+          <div className="space-y-3">
+            {rollup.managerBreakdown.map(m => (
+              <div key={m.soiId}>
+                <div className="flex items-baseline justify-between text-sm">
+                  <div>
+                    <span className="font-medium">{m.managerName}</span>
+                    <span className="text-xs ml-1.5" style={{color:TEXT_DIM}}>{m.vintage}</span>
+                  </div>
+                  <div className="tabular-nums">{fmtCurrency(m.value)}</div>
+                </div>
+                <div className="h-1.5 rounded-full mt-1 overflow-hidden" style={{ backgroundColor: PANEL_2 }}>
+                  <div className="h-full" style={{ width: `${m.pct}%`, backgroundColor: ACCENT }} />
+                </div>
+                <div className="text-[10px] mt-0.5 tabular-nums" style={{color:TEXT_MUTE}}>{fmtPct(m.pct,1)} • {m.positionCount} positions</div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
+
+      {/* TOP TOKENS */}
+      <Panel className="p-5">
+        <div className="flex items-baseline justify-between mb-3">
+          <div>
+            <div className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Top-10 holdings (rolled up)</div>
+            <div className="text-base font-semibold mt-0.5">Aggregate token exposure across managers</div>
+          </div>
+          {rollup.positions.some(p => p.hasLivePrice) && (
+            <div className="text-xs" style={{ color: TEXT_DIM }}>
+              <span style={{ color: GREEN }}>●</span> Live prices applied
+            </div>
+          )}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ color: TEXT_MUTE, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <th className="text-left py-2 pr-3">Token</th>
+                <th className="text-left py-2 pr-3">Sector</th>
+                <th className="text-right py-2 pr-3">24h</th>
+                <th className="text-right py-2 pr-3">Value</th>
+                <th className="text-right py-2 pr-3">% of book</th>
+                <th className="text-right py-2 pr-3">In funds</th>
+                <th className="text-right py-2">Liquidity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rollup.tokenRollup.slice(0, 10).map(t => (
+                <tr key={t.key} style={{ borderTop: `1px solid ${BORDER}` }}>
+                  <td className="py-2.5 pr-3">
+                    <div className="font-medium">{t.symbol || t.name}</div>
+                    {t.symbol && t.name !== t.symbol && <div className="text-[10px]" style={{color:TEXT_MUTE}}>{t.name}</div>}
+                  </td>
+                  <td className="py-2.5 pr-3"><SectorBadge sectorId={t.sectorId} /></td>
+                  <td className="py-2.5 pr-3 text-right tabular-nums"><ChangeCell value={t.change24h} /></td>
+                  <td className="py-2.5 pr-3 text-right tabular-nums font-medium">{fmtCurrency(t.value)}</td>
+                  <td className="py-2.5 pr-3 text-right tabular-nums">{fmtPct(t.pct, 2)}</td>
+                  <td className="py-2.5 pr-3 text-right tabular-nums" style={{color: TEXT_DIM}}>{t.managerCount}</td>
+                  <td className="py-2.5 text-right"><LiquidityBadge liquid={t.liquid} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+/* =============================================================================
+   MANAGERS TAB — list of manager/vintage cards, click to drill into SOI detail
+   ============================================================================= */
+function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {rollup.managerBreakdown.map(m => {
+        const soi = store.soIs.find(s => s.id === m.soiId);
+        const positions = (soi?.positions || []).map(p => {
+          const sectorId = resolveSector(p, store.sectorOverrides);
+          const liquid = isLiquid(p);
+          return { ...p, sectorId, liquid };
+        });
+        // Per-SOI sparkline
+        const startMs = rangeToStartMs(range, positions);
+        const series = apiKey && Object.keys(priceHistory).length > 0
+          ? buildNAVSeries(positions, priceHistory, startMs, Date.now())
+          : [];
+        const startVal = series[0]?.value ?? 0;
+        const endVal = series[series.length-1]?.value ?? 0;
+        const retPct = startVal > 0 ? ((endVal - startVal) / startVal) * 100 : null;
+
+        const bySector = _.groupBy(positions, 'sectorId');
+        const sectorTop = Object.entries(bySector).map(([sid, items]) => {
+          const val = _.sumBy(items, p => p.soiMarketValue || 0);
+          return { id: sid, label: sectorOf(sid).label, color: sectorOf(sid).color, value: val };
+        }).sort((a,b) => b.value - a.value).slice(0, 5);
+        return (
+          <Panel key={m.soiId} className="p-5 hover:cursor-pointer transition-colors"
+            style={{ borderColor: BORDER }}
+            onClick={() => onDrill(m.soiId)}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="text-base font-semibold">{m.managerName}</div>
+                <div className="text-xs" style={{color:TEXT_DIM}}>{m.vintage} • As of {m.asOfDate || '—'}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-lg font-semibold tabular-nums">{fmtCurrency(m.value)}</div>
+                <div className="text-xs" style={{color:TEXT_DIM}}>{fmtPct(m.pct, 1)} of book</div>
+              </div>
+            </div>
+            {series.length > 1 && (
+              <div className="mt-3 flex items-center gap-3">
+                <MiniSparkline series={series} width={140} height={34} />
+                {retPct !== null && (
+                  <div className="text-xs font-medium" style={{color: retPct >= 0 ? GREEN : RED}}>
+                    {fmtPctSigned(retPct, 2)} <span style={{color:TEXT_MUTE}}>{range}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="mt-4 flex items-center gap-2 text-xs" style={{color:TEXT_DIM}}>
+              <span>{m.positionCount} positions</span>
+              <span style={{color:TEXT_MUTE}}>•</span>
+              <span>Tap to drill in <ChevronRight size={12} className="inline" /></span>
+            </div>
+            <div className="mt-4">
+              <div className="text-[10px] uppercase tracking-wider mb-1.5" style={{color:TEXT_MUTE}}>Sector tilt</div>
+              <div className="flex h-2 rounded-full overflow-hidden" style={{backgroundColor: PANEL_2}}>
+                {sectorTop.map(s => (
+                  <div key={s.id} style={{ width: `${(s.value/m.value)*100}%`, backgroundColor: s.color }} title={s.label} />
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {sectorTop.slice(0, 3).map(s => (
+                  <span key={s.id} className="text-[10px] px-1.5 py-0.5 rounded"
+                    style={{ backgroundColor: s.color+'22', color: s.color, border: `1px solid ${s.color}44` }}>
+                    {s.label} {fmtPct((s.value/m.value)*100, 0)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </Panel>
+        );
+      })}
+    </div>
+  );
+}
+
+/* =============================================================================
+   POSITIONS TAB — flat rolled-up table of every underlying token
+   ============================================================================= */
+function PositionsTab({ rollup, store, updateStore }) {
+  const [search, setSearch] = useState('');
+  const [sectorFilter, setSectorFilter] = useState('all');
+  const [liquidityFilter, setLiquidityFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('value');
+  const [sortDir, setSortDir] = useState('desc');
+
+  const rows = useMemo(() => {
+    let r = rollup.tokenRollup;
+    if (search) {
+      const s = search.toLowerCase();
+      r = r.filter(x => String(x.symbol||'').toLowerCase().includes(s) || String(x.name||'').toLowerCase().includes(s));
+    }
+    if (sectorFilter !== 'all') r = r.filter(x => x.sectorId === sectorFilter);
+    if (liquidityFilter === 'liquid') r = r.filter(x => x.liquid);
+    if (liquidityFilter === 'illiquid') r = r.filter(x => !x.liquid);
+    return _.orderBy(r, sortBy, sortDir);
+  }, [rollup, search, sectorFilter, liquidityFilter, sortBy, sortDir]);
+
+  const toggleSort = (col) => {
+    if (sortBy === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(col); setSortDir('desc'); }
+  };
+
+  // Toggle liquidity on EVERY SAFT-type position with this ticker in the store
+  const flipForceLiquid = (tokenKey, newValue) => {
+    updateStore(s => ({
+      ...s,
+      soIs: s.soIs.map(soi => ({
+        ...soi,
+        positions: soi.positions.map(p => {
+          const key = (p.ticker && p.ticker.toUpperCase()) || p.positionName;
+          if (key !== tokenKey) return p;
+          return { ...p, forceLiquid: newValue };
+        }),
+      })),
+    }));
+  };
+
+  const changeSector = (tokenKey, sectorId) => {
+    updateStore(s => {
+      // Persist as a global override so future uploads with this ticker inherit it
+      const newOverrides = { ...s.sectorOverrides };
+      if (tokenKey && typeof tokenKey === 'string') newOverrides[tokenKey.toUpperCase()] = sectorId;
+      return {
+        ...s,
+        sectorOverrides: newOverrides,
+        soIs: s.soIs.map(soi => ({
+          ...soi,
+          positions: soi.positions.map(p => {
+            const key = (p.ticker && p.ticker.toUpperCase()) || p.positionName;
+            if (key !== tokenKey) return p;
+            return { ...p, sectorId };
+          }),
+        })),
+      };
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <Panel className="p-3 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 flex-1 min-w-[220px]">
+          <Search size={14} style={{ color: TEXT_DIM }} />
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search tokens…"
+            className="flex-1 bg-transparent text-sm outline-none" style={{color:TEXT}} />
+        </div>
+        <select value={sectorFilter} onChange={e=>setSectorFilter(e.target.value)}
+          className="text-xs px-2 py-1 rounded outline-none"
+          style={{ backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}` }}>
+          <option value="all">All sectors</option>
+          {SECTORS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          <option value="unclassified">Unclassified</option>
+        </select>
+        <select value={liquidityFilter} onChange={e=>setLiquidityFilter(e.target.value)}
+          className="text-xs px-2 py-1 rounded outline-none"
+          style={{ backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}` }}>
+          <option value="all">All liquidity</option>
+          <option value="liquid">Liquid only</option>
+          <option value="illiquid">Illiquid only</option>
+        </select>
+        <div className="text-xs" style={{color:TEXT_DIM}}>{rows.length} tokens</div>
+      </Panel>
+      <Panel className="p-0 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ color: TEXT_MUTE, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${BORDER}` }}>
+                <SortHead col="symbol"  by={sortBy} dir={sortDir} onClick={toggleSort} align="left">Token</SortHead>
+                <SortHead col="sectorId" by={sortBy} dir={sortDir} onClick={toggleSort} align="left">Sector</SortHead>
+                <SortHead col="change24h" by={sortBy} dir={sortDir} onClick={toggleSort} align="right">24h</SortHead>
+                <SortHead col="value" by={sortBy} dir={sortDir} onClick={toggleSort} align="right">Value</SortHead>
+                <SortHead col="pct" by={sortBy} dir={sortDir} onClick={toggleSort} align="right">% Book</SortHead>
+                <SortHead col="managerCount" by={sortBy} dir={sortDir} onClick={toggleSort} align="right">In funds</SortHead>
+                <th className="text-right px-3 py-2">Liquidity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(t => (
+                <tr key={t.key} style={{ borderBottom: `1px solid ${BORDER}` }}>
+                  <td className="px-3 py-2.5">
+                    <div className="font-medium">{t.symbol || t.name}</div>
+                    {t.symbol && t.name !== t.symbol && <div className="text-[10px]" style={{color:TEXT_MUTE}}>{t.name}</div>}
+                    <div className="text-[10px] mt-0.5" style={{color:TEXT_MUTE}}>
+                      {t.managers.slice(0,2).join(' • ')}{t.managers.length>2 ? ` +${t.managers.length-2}` : ''}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <select value={t.sectorId} onChange={e=>changeSector(t.key, e.target.value)}
+                      className="text-xs px-1.5 py-0.5 rounded outline-none"
+                      style={{ backgroundColor: 'transparent', color: sectorOf(t.sectorId).color, border: `1px solid ${sectorOf(t.sectorId).color}44` }}>
+                      {SECTORS.map(s => <option key={s.id} value={s.id} style={{backgroundColor:PANEL, color:TEXT}}>{s.label}</option>)}
+                      <option value="unclassified" style={{backgroundColor:PANEL, color:TEXT}}>Unclassified</option>
+                    </select>
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums"><ChangeCell value={t.change24h} /></td>
+                  <td className="px-3 py-2.5 text-right tabular-nums font-medium">{fmtCurrency(t.value)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{fmtPct(t.pct, 2)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums" style={{color:TEXT_DIM}}>{t.managerCount}</td>
+                  <td className="px-3 py-2.5 text-right">
+                    <button onClick={()=>flipForceLiquid(t.key, !t.forceLiquid)}
+                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded"
+                      style={{
+                        backgroundColor: t.liquid ? GREEN+'22' : GOLD+'22',
+                        color: t.liquid ? GREEN : GOLD,
+                        border: `1px solid ${t.liquid ? GREEN+'44' : GOLD+'44'}`,
+                      }}
+                      title={t.forceLiquid ? 'Click to revert to SOI treatment' : 'Mark as liquid (TGE\'d)'}>
+                      {t.liquid ? 'Liquid' : 'Illiquid'}
+                      {t.forceLiquid && <span style={{opacity:0.7}}>•</span>}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+function SortHead({ col, by, dir, onClick, align, children }) {
+  const active = by === col;
+  return (
+    <th className={`px-3 py-2 ${align==='right'?'text-right':'text-left'} cursor-pointer select-none`}
+      onClick={() => onClick(col)}
+      style={{ color: active ? TEXT : TEXT_MUTE }}>
+      {children}{active ? (dir==='asc' ? ' ▲' : ' ▼') : ''}
+    </th>
+  );
+}
+
+/* =============================================================================
+   SOI DETAIL — drill into a single manager/vintage
+   ============================================================================= */
+function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey }) {
+  const soi = store.soIs.find(s => s.id === soiId);
+  const manager = store.managers.find(m => m.id === soi?.managerId);
+  const [editingPosition, setEditingPosition] = useState(null); // {mode: 'add'|'edit', position?}
+  const [updatingSOI, setUpdatingSOI] = useState(false);
+  if (!soi) return null;
+
+  // Build enriched positions for this one SOI
+  const rows = useMemo(() => {
+    return soi.positions.map(p => {
+      const sectorId = resolveSector(p, store.sectorOverrides);
+      const liquid = isLiquid(p);
+      const live = p.cgTokenId && livePrices[p.cgTokenId];
+      const useLive = !!live && liquid;
+      const currentValue = useLive && p.quantity ? p.quantity * live.usd : p.soiMarketValue;
+      return {
+        ...p, sectorId, liquid, currentValue,
+        livePrice: useLive ? live.usd : null,
+        change24h: useLive ? live.change24h : null,
+        hasLivePrice: useLive,
+      };
+    });
+  }, [soi, store.sectorOverrides, livePrices]);
+
+  const totalNAV = _.sumBy(rows, 'currentValue');
+  const soiNAV = _.sumBy(rows, 'soiMarketValue');
+  const liquidNAV = _.sumBy(rows.filter(r=>r.liquid), 'currentValue');
+  const illiquidNAV = _.sumBy(rows.filter(r=>!r.liquid), 'currentValue');
+
+  const bySector = _.groupBy(rows, 'sectorId');
+  const sectorData = SECTORS.map(s => {
+    const items = bySector[s.id] || [];
+    const v = _.sumBy(items, 'currentValue');
+    return { id: s.id, label: s.label, color: s.color, value: v, pct: totalNAV>0?(v/totalNAV)*100:0, count: items.length };
+  }).filter(s => s.value > 0);
+
+  const cycleLiquidity = (posId) => {
+    // auto → liquid → illiquid → auto
+    const cur = rows.find(r => r.id === posId);
+    const curOverride = liquidityOverrideOf(cur);
+    const next = curOverride === 'auto' ? (cur.liquid ? 'illiquid' : 'liquid')
+               : curOverride === 'liquid' ? 'illiquid'
+               : curOverride === 'illiquid' ? 'auto' : 'auto';
+    updateStore(s => ({
+      ...s,
+      soIs: s.soIs.map(x => x.id !== soiId ? x : ({
+        ...x,
+        positions: x.positions.map(p => {
+          if (p.id !== posId) return p;
+          const copy = { ...p, liquidityOverride: next };
+          delete copy.forceLiquid; // migrate off legacy field
+          return copy;
+        }),
+      })),
+    }));
+  };
+
+  const savePosition = (payload) => {
+    updateStore(s => ({
+      ...s,
+      soIs: s.soIs.map(x => {
+        if (x.id !== soiId) return x;
+        if (payload.id && x.positions.find(p => p.id === payload.id)) {
+          return { ...x, positions: x.positions.map(p => p.id === payload.id ? { ...p, ...payload } : p) };
+        }
+        return { ...x, positions: [...x.positions, { ...payload, id: payload.id || uid() }] };
+      }),
+    }));
+    setEditingPosition(null);
+  };
+
+  const deletePosition = (posId) => {
+    if (!confirm('Delete this position?')) return;
+    updateStore(s => ({
+      ...s,
+      soIs: s.soIs.map(x => x.id !== soiId ? x : ({ ...x, positions: x.positions.filter(p => p.id !== posId) })),
+    }));
+  };
+
+  // Positions for chart (need liquid flag computed same way as rows)
+  const chartPositions = rows;
+
+  return (
+    <div className="space-y-4">
+      <button onClick={onBack} className="text-xs flex items-center gap-1 hover:underline" style={{color:TEXT_DIM}}>
+        <ArrowLeft size={12} /> Back to managers
+      </button>
+      <div className="flex items-baseline justify-between">
+        <div>
+          <div className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Manager SOI</div>
+          <h2 className="text-xl font-semibold mt-0.5">{manager?.name} — {soi.vintage}</h2>
+          <div className="text-xs mt-1 flex items-center gap-2" style={{color:TEXT_DIM}}>
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{color:GOLD, backgroundColor:GOLD+'11', border:`1px solid ${GOLD}44`}}>
+              As of {soi.asOfDate || '—'}
+            </span>
+            <span>{rows.length} positions</span>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Fund NAV</div>
+          <div className="text-xl font-semibold">{fmtCurrency(totalNAV)}</div>
+          {totalNAV !== soiNAV && (
+            <div className="text-[11px]" style={{color:TEXT_DIM}}>
+              SOI: {fmtCurrency(soiNAV)} • <ChangeCell value={((totalNAV-soiNAV)/soiNAV)*100} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Performance chart */}
+      <PerformanceChart
+        positions={chartPositions}
+        priceHistory={priceHistory}
+        historyLoading={historyLoading}
+        historyProgress={historyProgress}
+        range={range}
+        onRangeChange={onRangeChange}
+        onRequestFetch={onRequestFetch}
+        apiKey={apiKey}
+        title={`${manager?.name} ${soi.vintage} performance`}
+        height={240}
+        asOfDate={soi.asOfDate}
+      />
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KPI label="NAV" value={fmtCurrency(totalNAV)} />
+        <KPI label="Positions" value={rows.length} />
+        <KPI label="Liquid" value={fmtCurrency(liquidNAV)} sub={fmtPct(totalNAV>0?(liquidNAV/totalNAV)*100:0,1)} />
+        <KPI label="Illiquid" value={fmtCurrency(illiquidNAV)} sub={fmtPct(totalNAV>0?(illiquidNAV/totalNAV)*100:0,1)} />
+      </div>
+
+      <Panel className="p-5">
+        <div className="text-xs uppercase tracking-wider mb-3" style={{color:TEXT_MUTE}}>Sector tilt</div>
+        <div className="flex h-3 rounded-full overflow-hidden mb-3" style={{backgroundColor:PANEL_2}}>
+          {sectorData.map(s => (
+            <div key={s.id} style={{width: `${s.pct}%`, backgroundColor: s.color}} title={`${s.label} ${fmtPct(s.pct,1)}`} />
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {sectorData.map(s => (
+            <div key={s.id} className="text-xs px-2 py-1 rounded flex items-center gap-1.5"
+              style={{backgroundColor: s.color+'22', color: s.color, border: `1px solid ${s.color}44`}}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{backgroundColor: s.color}} />
+              {s.label} <span className="tabular-nums">{fmtPct(s.pct,1)}</span>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      {/* Positions table */}
+      <Panel className="p-0 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3" style={{borderBottom: `1px solid ${BORDER}`}}>
+          <div className="text-sm font-semibold">Positions</div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setUpdatingSOI(true)}
+              className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
+              style={{color: TEXT, backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+              <RefreshCw size={12} /> Update holdings
+            </button>
+            <button onClick={() => setEditingPosition({ mode: 'add' })}
+              className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
+              style={{backgroundColor: ACCENT, color: BG}}>
+              <Plus size={12} /> Add position
+            </button>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ color: TEXT_MUTE, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${BORDER}` }}>
+                <th className="text-left px-3 py-2">Position</th>
+                <th className="text-left px-3 py-2">Sector</th>
+                <th className="text-right px-3 py-2">Qty</th>
+                <th className="text-right px-3 py-2">SOI Px</th>
+                <th className="text-right px-3 py-2">Live Px</th>
+                <th className="text-right px-3 py-2">24h</th>
+                <th className="text-right px-3 py-2">Cost</th>
+                <th className="text-right px-3 py-2">Value</th>
+                <th className="text-right px-3 py-2">P&amp;L $</th>
+                <th className="text-right px-3 py-2">P&amp;L %</th>
+                <th className="text-right px-3 py-2">% NAV</th>
+                <th className="text-right px-3 py-2">Liquidity</th>
+                <th className="text-right px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {_.orderBy(rows, 'currentValue', 'desc').map(p => {
+                const pct = totalNAV>0 ? (p.currentValue/totalNAV)*100 : 0;
+                const plDollars = p.costBasis != null ? p.currentValue - p.costBasis : null;
+                const plPct = (p.costBasis != null && p.costBasis !== 0) ? (plDollars / p.costBasis) * 100 : null;
+                const override = liquidityOverrideOf(p);
+                return (
+                  <tr key={p.id} style={{borderBottom: `1px solid ${BORDER}`}}>
+                    <td className="px-3 py-2.5">
+                      <div className="font-medium">{p.positionName}</div>
+                      <div className="text-[10px]" style={{color:TEXT_MUTE}}>
+                        {p.ticker && <span>{p.ticker}</span>}
+                        {p.assetType && <span> • {p.assetType}</span>}
+                        {p.acquisitionDate && <span> • Acq {String(p.acquisitionDate).slice(0,10)}</span>}
+                      </div>
+                      {p.notes && <div className="text-[10px] mt-0.5" style={{color:TEXT_DIM}}>{p.notes}</div>}
+                    </td>
+                    <td className="px-3 py-2.5"><SectorBadge sectorId={p.sectorId} /></td>
+                    <td className="px-3 py-2.5 text-right tabular-nums" style={{color: p.quantity ? TEXT : TEXT_MUTE}}>
+                      {p.quantity ? p.quantity.toLocaleString(undefined,{maximumFractionDigits: 2}) : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums" style={{color:TEXT_DIM}}>
+                      {p.soiPrice ? `$${p.soiPrice.toLocaleString(undefined,{maximumFractionDigits: 4})}` : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {p.livePrice ? <span style={{color:GREEN}}>${p.livePrice.toLocaleString(undefined,{maximumFractionDigits: 4})}</span> : <span style={{color:TEXT_MUTE}}>—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums"><ChangeCell value={p.change24h} /></td>
+                    <td className="px-3 py-2.5 text-right tabular-nums" style={{color:TEXT_DIM}}>
+                      {p.costBasis != null ? fmtCurrency(p.costBasis) : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-medium">{fmtCurrency(p.currentValue)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {plDollars != null ? <ChangeCell value={plDollars} format="currency" /> : <span style={{color:TEXT_MUTE}}>—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {plPct != null ? <ChangeCell value={plPct} /> : <span style={{color:TEXT_MUTE}}>—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{fmtPct(pct,2)}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <button onClick={()=>cycleLiquidity(p.id)}
+                        className="text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-1"
+                        style={{
+                          backgroundColor: p.liquid ? GREEN+'22' : GOLD+'22',
+                          color: p.liquid ? GREEN : GOLD,
+                          border: `1px solid ${p.liquid ? GREEN+'44' : GOLD+'44'}`,
+                        }}
+                        title={
+                          override === 'auto' ? 'Click to override (next: ' + (p.liquid ? 'Illiquid' : 'Liquid') + ')' :
+                          override === 'liquid' ? 'Forced liquid. Click for Illiquid.' :
+                          'Forced illiquid. Click to reset to auto.'
+                        }>
+                        {p.liquid ? 'Liquid' : 'Illiquid'}
+                        {override !== 'auto' && <Check size={10} />}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={()=>setEditingPosition({mode:'edit', position: p})}
+                          className="p-1 rounded" style={{color:TEXT_DIM}} title="Edit">
+                          <Edit2 size={12} />
+                        </button>
+                        <button onClick={()=>deletePosition(p.id)}
+                          className="p-1 rounded" style={{color:TEXT_DIM}} title="Delete">
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      {editingPosition && (
+        <PositionEditor
+          mode={editingPosition.mode}
+          position={editingPosition.position}
+          onCancel={() => setEditingPosition(null)}
+          onSave={savePosition}
+        />
+      )}
+
+      {updatingSOI && (
+        <ImportWizard
+          store={store}
+          updateStore={updateStore}
+          onClose={() => setUpdatingSOI(false)}
+          onDone={() => setUpdatingSOI(false)}
+          prefillTarget={{ soiId, managerId: soi.managerId, mode: 'replace' }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* =============================================================================
+   POSITION EDITOR MODAL — add or edit a single position
+   ============================================================================= */
+function PositionEditor({ mode, position, onCancel, onSave }) {
+  const [form, setForm] = useState(() => ({
+    id: position?.id || null,
+    positionName: position?.positionName || '',
+    ticker: position?.ticker || '',
+    assetType: position?.assetType || 'Liquid Token',
+    sectorId: position?.sectorId || 'infrastructure',
+    quantity: position?.quantity ?? '',
+    soiPrice: position?.soiPrice ?? '',
+    soiMarketValue: position?.soiMarketValue ?? '',
+    costBasis: position?.costBasis ?? '',
+    acquisitionDate: position?.acquisitionDate || '',
+    liquidityOverride: liquidityOverrideOf(position || {}),
+    cgTokenId: position?.cgTokenId || '',
+    notes: position?.notes || '',
+  }));
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const canSave = form.positionName && form.soiMarketValue !== '' && parseNum(form.soiMarketValue) != null;
+
+  const handleSave = () => {
+    const qty = parseNum(form.quantity);
+    const price = parseNum(form.soiPrice);
+    let mv = parseNum(form.soiMarketValue);
+    if ((mv == null || mv === 0) && qty != null && price != null) mv = qty * price;
+    const payload = {
+      id: form.id || undefined,
+      positionName: form.positionName.trim(),
+      ticker: form.ticker.trim(),
+      assetType: form.assetType,
+      sectorId: form.sectorId,
+      quantity: qty,
+      soiPrice: price,
+      soiMarketValue: mv || 0,
+      costBasis: parseNum(form.costBasis),
+      acquisitionDate: form.acquisitionDate || null,
+      liquidityOverride: form.liquidityOverride,
+      cgTokenId: form.cgTokenId.trim() || null,
+      chain: null, address: null,
+      notes: form.notes,
+    };
+    onSave(payload);
+  };
+
+  return (
+    <Modal title={mode === 'edit' ? `Edit: ${position?.positionName || 'Position'}` : 'Add position'} onClose={onCancel}>
+      <div className="p-5 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field label="Position Name *">
+            <TextInput value={form.positionName} onChange={v=>set('positionName', v)} placeholder="e.g., Ethereum" />
+          </Field>
+          <Field label="Ticker / Symbol">
+            <TextInput value={form.ticker} onChange={v=>set('ticker', v.toUpperCase())} placeholder="e.g., ETH" />
+          </Field>
+          <Field label="Asset Type">
+            <Select value={form.assetType} onChange={v=>set('assetType', v)} options={[
+              {value: 'Liquid Token', label: 'Liquid Token'},
+              {value: 'SAFT', label: 'SAFT (pre-TGE)'},
+              {value: 'SAFE', label: 'SAFE (equity)'},
+              {value: 'Warrant', label: 'Warrant'},
+              {value: 'LP Token', label: 'LP Token'},
+              {value: 'Stablecoin', label: 'Stablecoin / Cash'},
+              {value: 'Unclassified', label: 'Unclassified'},
+            ]} />
+          </Field>
+          <Field label="Sector">
+            <Select value={form.sectorId} onChange={v=>set('sectorId', v)} options={[
+              ...SECTORS.map(s => ({value: s.id, label: s.label})),
+              {value: 'unclassified', label: 'Unclassified'},
+            ]} />
+          </Field>
+          <Field label="Quantity">
+            <TextInput value={form.quantity} onChange={v=>set('quantity', v)} placeholder="e.g., 1000000" align="right" />
+          </Field>
+          <Field label="SOI Price (per unit)">
+            <TextInput value={form.soiPrice} onChange={v=>set('soiPrice', v)} placeholder="e.g., 2200" align="right" />
+          </Field>
+          <Field label="Market Value at SOI *">
+            <TextInput value={form.soiMarketValue} onChange={v=>set('soiMarketValue', v)} placeholder="e.g., 2200000" align="right" />
+          </Field>
+          <Field label="Cost Basis ($)">
+            <TextInput value={form.costBasis} onChange={v=>set('costBasis', v)} placeholder="e.g., 1500000" align="right" />
+          </Field>
+          <Field label="Acquisition Date">
+            <TextInput type="date" value={form.acquisitionDate} onChange={v=>set('acquisitionDate', v)} />
+          </Field>
+          <Field label="Liquidity">
+            <Select value={form.liquidityOverride} onChange={v=>set('liquidityOverride', v)} options={[
+              {value: 'auto', label: 'Auto (based on asset type)'},
+              {value: 'liquid', label: 'Force liquid'},
+              {value: 'illiquid', label: 'Force illiquid'},
+            ]} />
+          </Field>
+          <Field label="CoinGecko Token ID (for live prices)" full>
+            <TextInput value={form.cgTokenId} onChange={v=>set('cgTokenId', v)} placeholder="e.g., ethereum, hyperliquid, ondo-finance" />
+            <div className="text-[10px] mt-1" style={{color:TEXT_MUTE}}>
+              Find this in the URL on coingecko.com (e.g., coingecko.com/en/coins/<strong style={{color:TEXT_DIM}}>ethereum</strong>)
+            </div>
+          </Field>
+          <Field label="Notes" full>
+            <TextInput value={form.notes} onChange={v=>set('notes', v)} placeholder="Optional — e.g., locked until 2027, side letter terms" />
+          </Field>
+        </div>
+        <div className="flex justify-end gap-2 pt-3" style={{borderTop: `1px solid ${BORDER}`}}>
+          <button onClick={onCancel} className="text-xs px-3 py-1.5 rounded"
+            style={{color:TEXT_DIM, border:`1px solid ${BORDER}`}}>Cancel</button>
+          <button onClick={handleSave} disabled={!canSave}
+            className="text-xs px-4 py-1.5 rounded font-medium flex items-center gap-1"
+            style={{backgroundColor: ACCENT, color: BG, opacity: canSave?1:0.4}}>
+            <Check size={12}/> {mode === 'edit' ? 'Save changes' : 'Add position'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function Field({ label, children, full }) {
+  return (
+    <div className={full ? 'md:col-span-2' : ''}>
+      <label className="text-[10px] uppercase tracking-wider" style={{color:TEXT_MUTE}}>{label}</label>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+function TextInput({ value, onChange, placeholder, type='text', align }) {
+  return (
+    <input type={type} value={value ?? ''} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+      className={`w-full px-3 py-2 rounded text-sm outline-none ${align==='right'?'text-right tabular-nums':''}`}
+      style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} />
+  );
+}
+function Select({ value, onChange, options }) {
+  return (
+    <select value={value} onChange={e=>onChange(e.target.value)}
+      className="w-full px-3 py-2 rounded text-sm outline-none"
+      style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
+      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
+/* =============================================================================
+   IMPORT WIZARD — file upload → map cols → assign to manager/client → save
+   Also supports manual entry from scratch.
+   ============================================================================= */
+function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
+  // If prefilled (quarterly update), jump straight to upload step and pre-select the target
+  const isReplaceMode = !!prefillTarget;
+  const prefilledSoi = prefillTarget ? store.soIs.find(s => s.id === prefillTarget.soiId) : null;
+  const prefilledManager = prefillTarget ? store.managers.find(m => m.id === prefillTarget.managerId) : null;
+  const prefilledClient = prefillTarget
+    ? store.commitments.find(c => c.soiId === prefillTarget.soiId)?.clientId
+    : null;
+
+  const [mode, setMode] = useState(isReplaceMode ? 'upload' : 'choose'); // choose | upload | manual
+  const [step, setStep] = useState(isReplaceMode ? 1 : 1); // 1 file, 2 map, 3 assign
   const [fileName, setFileName] = useState('');
-  const [workbook, setWorkbook] = useState(null);
-  const [activeSheet, setActiveSheet] = useState('');
+  const [sheetName, setSheetName] = useState('');
+  const [sheets, setSheets] = useState({});
   const [headers, setHeaders] = useState([]);
   const [rows, setRows] = useState([]);
   const [columnMap, setColumnMap] = useState({});
@@ -184,1162 +2153,630 @@ export default function SOIDashboard() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const [apiKey, setApiKey] = useState('');
-  const withKey = useCallback((url) => {
-    if (!apiKey) return url;
-    return url + (url.includes('?') ? '&' : '?') + `x_cg_demo_api_key=${encodeURIComponent(apiKey)}`;
-  }, [apiKey]);
+  // Update behavior: 'new' (default) or 'replace' (overwrite existing SOI)
+  // Only relevant when user selects a manager that already has SOIs
+  const [updateBehavior, setUpdateBehavior] = useState(isReplaceMode ? 'replace' : 'new');
+  const [replaceTargetSoiId, setReplaceTargetSoiId] = useState(isReplaceMode ? prefillTarget.soiId : '');
 
-  const [tokenMap, setTokenMap] = useState({});
-  const [resolvingTokens, setResolvingTokens] = useState(false);
-  const [apiStatus, setApiStatus] = useState('unknown');
+  // Assignment fields
+  const [assignClientId, setAssignClientId] = useState(prefilledClient || store.clients[0]?.id || '');
+  const [newClientName, setNewClientName] = useState('');
+  const [assignManagerId, setAssignManagerId] = useState(prefilledManager?.id || '');
+  const [newManagerName, setNewManagerName] = useState('');
+  const [vintage, setVintage] = useState(prefilledSoi?.vintage || '');
+  const [asOfDate, setAsOfDate] = useState(today());
+  const [committed, setCommitted] = useState('');
 
-  const [livePrices, setLivePrices] = useState({});
-  const [historicalPrices, setHistoricalPrices] = useState({});
-  const [portfolioSeries, setPortfolioSeries] = useState([]);
-  const [lastRefresh, setLastRefresh] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0, task: '' });
-  const [priceErrors, setPriceErrors] = useState([]);
+  // Manual entry state
+  const [manualPositions, setManualPositions] = useState([{
+    positionName: '', ticker: '', quantity: '', soiMarketValue: '', sectorId: 'infrastructure', acquisitionDate: '', assetType: 'Liquid Token',
+  }]);
 
-  const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState('currentValue');
-  const [sortDir, setSortDir] = useState('desc');
-  const [sectorFilter, setSectorFilter] = useState('all');
-  const [typeFilter, setTypeFilter] = useState('all');
-
-  const loadSheet = useCallback((sheetData) => {
-    const { headers: hdrs, rows: rws } = sheetData;
-    const { mapping, scores } = autoMapColumns(hdrs);
-    setHeaders(hdrs); setRows(rws); setColumnMap(mapping); setAutoScores(scores);
-    setStage(STAGES.MAP);
-  }, []);
-
-  const handleFile = useCallback(async (file) => {
+  const handleFile = async (file) => {
     setLoading(true); setError(''); setFileName(file.name);
     try {
       const ext = file.name.split('.').pop().toLowerCase();
-      const sheets = {};
+      const out = {};
       if (ext === 'csv') {
         const text = await file.text();
         const parsed = Papa.parse(text, { header: false, dynamicTyping: false, skipEmptyLines: 'greedy' });
-        const matrix = parsed.data;
-        if (!matrix.length) throw new Error('CSV appears empty.');
-        const hi = detectHeaderRow(matrix);
-        const hdrs = dedupeHeaders((matrix[hi] || []).map(c => String(c ?? '')));
-        const dataRows = matrix.slice(hi + 1).map(arr => { const o = {}; hdrs.forEach((h, i) => { o[h] = arr[i] ?? ''; }); return o; });
-        sheets['Sheet1'] = { headers: hdrs, rows: dataRows, headerRowIndex: hi };
+        const m = parsed.data; if (!m.length) throw new Error('CSV appears empty.');
+        const hi = detectHeaderRow(m);
+        const hdrs = dedupeHeaders((m[hi] || []).map(c => String(c ?? '')));
+        const dataRows = m.slice(hi + 1).map(arr => { const o = {}; hdrs.forEach((h, i) => { o[h] = arr[i] ?? ''; }); return o; });
+        out['Sheet1'] = { headers: hdrs, rows: dataRows };
       } else if (ext === 'xlsx' || ext === 'xls') {
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: 'array', cellDates: true });
         for (const name of wb.SheetNames) {
           const sheet = wb.Sheets[name];
-          const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: false });
-          if (!matrix.length) continue;
-          const hi = detectHeaderRow(matrix);
-          const hdrs = dedupeHeaders((matrix[hi] || []).map(c => String(c ?? '')));
-          const dataRows = matrix.slice(hi + 1).map(arr => { const o = {}; hdrs.forEach((h, i) => { o[h] = arr[i] ?? ''; }); return o; });
-          sheets[name] = { headers: hdrs, rows: dataRows, headerRowIndex: hi };
+          const m = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: false });
+          if (!m.length) continue;
+          const hi = detectHeaderRow(m);
+          const hdrs = dedupeHeaders((m[hi] || []).map(c => String(c ?? '')));
+          const dataRows = m.slice(hi + 1).map(arr => { const o = {}; hdrs.forEach((h, i) => { o[h] = arr[i] ?? ''; }); return o; });
+          out[name] = { headers: hdrs, rows: dataRows };
         }
-      } else throw new Error('Unsupported file type. Use .xlsx, .xls, or .csv.');
-
-      const names = Object.keys(sheets);
-      if (!names.length) throw new Error('No readable sheets found.');
-      setWorkbook({ sheets });
-      if (names.length === 1) { setActiveSheet(names[0]); loadSheet(sheets[names[0]]); }
-      else {
-        let bestName = names[0], bestScore = -1;
-        for (const n of names) {
-          const { scores } = autoMapColumns(sheets[n].headers);
-          const total = Object.values(scores).reduce((a, b) => a + b, 0);
-          if (total > bestScore) { bestScore = total; bestName = n; }
-        }
-        setActiveSheet(bestName);
-        if (bestScore > 400) loadSheet(sheets[bestName]); else setStage(STAGES.SHEET_PICK);
+      } else throw new Error('Use .xlsx, .xls, or .csv.');
+      if (!Object.keys(out).length) throw new Error('No readable sheets.');
+      setSheets(out);
+      // Auto-pick best-scoring sheet
+      let best = Object.keys(out)[0], bestScore = -1;
+      for (const n of Object.keys(out)) {
+        const { scores } = autoMapColumns(out[n].headers);
+        const total = Object.values(scores).reduce((a,b)=>a+b, 0);
+        if (total > bestScore) { bestScore = total; best = n; }
       }
-    } catch (e) { setError(e.message || 'Failed to parse file.'); }
+      setSheetName(best);
+      const s = out[best];
+      const { mapping, scores } = autoMapColumns(s.headers);
+      setHeaders(s.headers); setRows(s.rows); setColumnMap(mapping); setAutoScores(scores);
+      setStep(2);
+    } catch (e) { setError(e.message || 'Failed to parse.'); }
     finally { setLoading(false); }
-  }, [loadSheet]);
-
-  const onDrop = (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); };
-
-  const reset = () => {
-    setStage(STAGES.UPLOAD); setWorkbook(null); setActiveSheet(''); setHeaders([]); setRows([]);
-    setColumnMap({}); setAutoScores({}); setFileName(''); setError('');
-    setTokenMap({}); setLivePrices({}); setHistoricalPrices({}); setPortfolioSeries([]);
-    setLastRefresh(null); setPriceErrors([]);
-    setSearch(''); setSectorFilter('all'); setTypeFilter('all');
   };
 
-  const soiPositions = useMemo(() => {
-    if (!rows.length || !columnMap.positionName) return [];
+  const switchSheet = (name) => {
+    setSheetName(name);
+    const s = sheets[name];
+    const { mapping, scores } = autoMapColumns(s.headers);
+    setHeaders(s.headers); setRows(s.rows); setColumnMap(mapping); setAutoScores(scores);
+  };
+
+  const parsedPositions = useMemo(() => {
+    if (!columnMap.positionName) return [];
     const out = [];
     for (const row of rows) {
       const name = String(row[columnMap.positionName] ?? '').trim();
       if (!name || SUBTOTAL_PATTERNS.test(name)) continue;
       const qty = columnMap.quantity ? parseNum(row[columnMap.quantity]) : null;
       const price = columnMap.price ? parseNum(row[columnMap.price]) : null;
-      let soiMV = columnMap.marketValue ? parseNum(row[columnMap.marketValue]) : null;
-      if ((soiMV === null || soiMV === 0) && qty !== null && price !== null) soiMV = qty * price;
+      let mv = columnMap.marketValue ? parseNum(row[columnMap.marketValue]) : null;
+      if ((mv === null || mv === 0) && qty !== null && price !== null) mv = qty * price;
+      if (mv === null) continue;
+      const ticker = columnMap.ticker ? String(row[columnMap.ticker] ?? '').trim() : '';
+      const assetType = columnMap.assetType ? (String(row[columnMap.assetType] ?? '').trim() || 'Unclassified') : 'Unclassified';
+      const sector = columnMap.sector ? (String(row[columnMap.sector] ?? '').trim()) : '';
       const cost = columnMap.costBasis ? parseNum(row[columnMap.costBasis]) : null;
-      const pct = columnMap.pctNav ? parseNum(row[columnMap.pctNav]) : null;
       const acq = columnMap.acquisitionDate ? parseDate(row[columnMap.acquisitionDate]) : null;
-      if (soiMV === null && pct === null) continue;
+
+      // Sector: (1) user's column value mapped to our canonical ids if possible, (2) ticker→default, (3) unclassified
+      let sectorId = UNCLASSIFIED.id;
+      if (sector) {
+        const n = normalize(sector);
+        const match = SECTORS.find(s => n.includes(s.id) || s.label.toLowerCase().includes(n) || n.includes(s.label.toLowerCase()));
+        if (match) sectorId = match.id;
+      }
+      if (sectorId === UNCLASSIFIED.id && ticker) {
+        const sym = ticker.toUpperCase();
+        if (DEFAULT_TOKEN_SECTOR[sym]) sectorId = DEFAULT_TOKEN_SECTOR[sym];
+      }
 
       out.push({
-        id: out.length,
+        id: uid(),
         positionName: name,
-        ticker: columnMap.ticker ? String(row[columnMap.ticker] ?? '').trim() : '',
-        assetType: columnMap.assetType ? (String(row[columnMap.assetType] ?? '').trim() || 'Unclassified') : 'Unclassified',
-        sector: columnMap.sector ? (String(row[columnMap.sector] ?? '').trim() || 'Unclassified') : 'Unclassified',
-        quantity: qty, soiPrice: price, costBasis: cost, soiMarketValue: soiMV ?? 0,
-        pctNavRaw: pct, acquisitionDate: acq,
-        liquidity: columnMap.liquidity ? (String(row[columnMap.liquidity] ?? '').trim() || 'Unclassified') : 'Unclassified',
+        ticker, quantity: qty, soiPrice: price, costBasis: cost,
+        soiMarketValue: mv,
+        acquisitionDate: acq ? acq.toISOString().slice(0,10) : null,
+        assetType, sectorId,
+        forceLiquid: false,
+        cgTokenId: null, chain: null, address: null, notes: '',
       });
     }
     return out;
   }, [rows, columnMap]);
 
-  const confirmMapping = () => {
-    if (!columnMap.positionName) { setError('Map the Position Name column.'); return; }
-    if (!columnMap.marketValue && !(columnMap.quantity && columnMap.price)) {
-      setError('Map Market Value (or both Quantity and Price).'); return;
-    }
-    if (!columnMap.quantity) { setError('Quantity is required for live price tracking.'); return; }
-    setError('');
+  const finalize = () => {
+    const positions = mode === 'manual'
+      ? manualPositions.filter(p => p.positionName && p.soiMarketValue).map(p => ({
+          id: uid(),
+          positionName: p.positionName,
+          ticker: p.ticker || '',
+          quantity: parseNum(p.quantity),
+          soiPrice: null,
+          costBasis: null,
+          soiMarketValue: parseNum(p.soiMarketValue) || 0,
+          acquisitionDate: p.acquisitionDate || null,
+          assetType: p.assetType || 'Unclassified',
+          sectorId: p.sectorId,
+          liquidityOverride: 'auto', cgTokenId: null, chain: null, address: null, notes: '',
+        }))
+      : parsedPositions;
 
-    const seeded = {};
-    for (const p of soiPositions) {
-      const keys = [p.ticker, p.positionName].map(s => normalize(s)).filter(Boolean);
-      let preset = null;
-      for (const k of keys) { if (TOKEN_PRESETS[k]) { preset = TOKEN_PRESETS[k]; break; } }
-      const nm = (p.positionName + ' ' + (p.assetType || '')).toLowerCase();
-      if (/safe|saft|warrant/.test(nm)) {
-        seeded[p.id] = { status: 'skip', reason: 'instrument-type' };
-      } else if (preset?.isCex) {
-        seeded[p.id] = { status: 'cex', symbol: preset.symbol };
-      } else if (preset) {
-        seeded[p.id] = { status: 'resolved', chain: preset.chain, address: preset.address, symbol: preset.symbol, name: p.positionName };
-      } else {
-        seeded[p.id] = { status: 'unresolved' };
-      }
-    }
-    setTokenMap(seeded);
-    setStage(STAGES.TOKENS);
-  };
+    if (!positions.length) { setError('No valid positions to save.'); return; }
 
-  const searchDexScreener = useCallback(async (query) => {
-    const q = String(query || '').trim();
-    if (!q || q.length < 2) return { results: [], error: null };
-    if (!apiKey) return { results: [], error: 'Paste your free CoinGecko Demo key at the top to enable search.' };
-    try {
-      const res = await fetch(withKey(`${GT_BASE}/search/pools?query=${encodeURIComponent(q)}`));
-      if (res.status === 401 || res.status === 403) { setApiStatus('bad_key'); return { results: [], error: 'Invalid API key. Double-check you pasted your Demo key correctly.' }; }
-      if (res.status === 429) { setApiStatus('rate_limited'); return { results: [], error: 'Rate limit (30/min for Demo tier). Wait a moment.' }; }
-      if (!res.ok) { setApiStatus('error'); return { results: [], error: `CoinGecko returned ${res.status}.` }; }
-      const data = await res.json();
-      setApiStatus('ok');
-      const pools = data.data || [];
-      const included = data.included || [];
-      const tokenById = {};
-      for (const inc of included) { if (inc.type === 'token') tokenById[inc.id] = inc; }
-
-      const byToken = {};
-      for (const pool of pools) {
-        const attrs = pool.attributes || {};
-        const rel = pool.relationships || {};
-        const baseId = rel.base_token?.data?.id;
-        if (!baseId) continue;
-        const baseTok = tokenById[baseId];
-        const underscore = baseId.indexOf('_');
-        if (underscore < 0) continue;
-        const chain = baseId.slice(0, underscore);
-        const address = baseId.slice(underscore + 1);
-        const liq = parseFloat(attrs.reserve_in_usd) || 0;
-        const key = `${chain}:${address.toLowerCase()}`;
-        if (!byToken[key] || liq > (byToken[key].liquidity || 0)) {
-          byToken[key] = {
-            chain, address,
-            name: baseTok?.attributes?.name || attrs.name?.split('/')[0]?.trim() || '',
-            symbol: baseTok?.attributes?.symbol || '',
-            priceUsd: parseFloat(attrs.base_token_price_usd) || null,
-            liquidity: liq,
-            fdv: parseFloat(attrs.fdv_usd) || null,
-            marketCap: parseFloat(attrs.market_cap_usd) || null,
-            dex: rel.dex?.data?.id || '',
-            pairAddress: attrs.address,
-            imageUrl: baseTok?.attributes?.image_url,
-          };
-        }
-      }
-      const results = Object.values(byToken).sort((a, b) => b.liquidity - a.liquidity).slice(0, 10);
-      return { results, error: null };
-    } catch (e) {
-      setApiStatus('blocked');
-      return { results: [], error: 'Network error. Check your connection.' };
-    }
-  }, [apiKey, withKey]);
-
-  const lookupByAddress = useCallback(async (chain, address) => {
-    if (!apiKey) return null;
-    try {
-      const gtChain = gtChainFor(chain);
-      const res = await fetch(withKey(`${GT_BASE}/networks/${gtChain}/tokens/${address}?include=top_pools`));
-      if (!res.ok) return null;
-      const data = await res.json();
-      const attrs = data.data?.attributes || {};
-      const included = data.included || [];
-      const topPool = included.find(i => i.type === 'pool');
-      return {
-        chain, address: attrs.address || address,
-        name: attrs.name || '', symbol: attrs.symbol || '',
-        priceUsd: parseFloat(attrs.price_usd) || null,
-        liquidity: parseFloat(topPool?.attributes?.reserve_in_usd) || 0,
-        fdv: parseFloat(attrs.fdv_usd) || null,
-        marketCap: parseFloat(attrs.market_cap_usd) || null,
-        dex: topPool?.relationships?.dex?.data?.id || '',
-        pairAddress: topPool?.attributes?.address,
+    // REPLACE PATH — overwrite positions on an existing SOI
+    if (updateBehavior === 'replace' && replaceTargetSoiId) {
+      const prior = store.soIs.find(s => s.id === replaceTargetSoiId);
+      if (!prior) { setError('Target SOI not found.'); return; }
+      const nextStore = {
+        ...store,
+        soIs: store.soIs.map(s => s.id !== replaceTargetSoiId ? s : ({
+          ...s,
+          asOfDate: asOfDate || today(),
+          positions,
+        })),
+        // Update the called amount on the matching commitment to reflect new MV total
+        commitments: store.commitments.map(c => c.soiId !== replaceTargetSoiId ? c : ({
+          ...c, called: _.sumBy(positions, 'soiMarketValue'),
+        })),
       };
-    } catch { return null; }
-  }, [apiKey, withKey]);
+      updateStore(nextStore);
+      onDone();
+      return;
+    }
 
-  useEffect(() => {
-    if (stage !== STAGES.TOKENS) return;
-    if (!apiKey) return;
-    let cancelled = false;
-    const run = async () => {
-      setResolvingTokens(true);
-      const updates = {};
-      for (const p of soiPositions) {
-        if (cancelled) break;
-        const cur = tokenMap[p.id];
-        if (!cur || cur.status !== 'unresolved') continue;
-        const queries = [p.ticker, p.positionName].map(s => String(s || '').trim()).filter(Boolean);
-        let best = null;
-        for (const q of queries) {
-          const { results } = await searchDexScreener(q);
-          if (!results.length) continue;
-          const qn = normalize(q);
-          const exactSym = results.find(r => normalize(r.symbol) === qn);
-          const exactName = results.find(r => normalize(r.name) === qn);
-          best = exactSym || exactName || results[0];
-          if (best) break;
-        }
-        if (best && best.liquidity > 500) {
-          updates[p.id] = { status: 'resolved', chain: best.chain, address: best.address, symbol: best.symbol, name: best.name, dex: best.dex, liquidity: best.liquidity };
-        }
-        await new Promise(r => setTimeout(r, 200));
-      }
-      if (!cancelled && Object.keys(updates).length) setTokenMap(prev => ({ ...prev, ...updates }));
-      if (!cancelled) setResolvingTokens(false);
+    // NEW PATH — create a new SOI + commitment
+    let nextStore = { ...store };
+
+    let clientId = assignClientId;
+    if (clientId === '__new__') {
+      clientId = uid();
+      nextStore = { ...nextStore, clients: [...nextStore.clients, { id: clientId, name: newClientName || 'New Client', notes: '' }] };
+    }
+    let managerId = assignManagerId;
+    if (managerId === '__new__' || !managerId) {
+      managerId = uid();
+      nextStore = { ...nextStore, managers: [...nextStore.managers, { id: managerId, name: newManagerName || 'New Manager', firm: '' }] };
+    }
+
+    const soiId = uid();
+    const soi = {
+      id: soiId, managerId, vintage: vintage || 'Main Fund',
+      asOfDate: asOfDate || today(), notes: '', positions,
     };
-    run();
-    return () => { cancelled = true; };
-  }, [stage, soiPositions, searchDexScreener, apiKey]);
-
-  const refreshPrices = useCallback(async () => {
-    setRefreshing(true); setPriceErrors([]);
-    const errors = [];
-
-    const byChain = {};
-    for (const [posId, t] of Object.entries(tokenMap)) {
-      if (t?.status !== 'resolved' || !t.chain || !t.address) continue;
-      if (!byChain[t.chain]) byChain[t.chain] = new Set();
-      byChain[t.chain].add(t.address);
-    }
-    const needBTC = Object.values(tokenMap).some(t => t?.status === 'cex' && t.symbol === 'BTC');
-
-    const newLive = {};
-    const chainEntries = Object.entries(byChain);
-    setRefreshProgress({ current: 0, total: chainEntries.length + (needBTC ? 1 : 0), task: 'Fetching live prices' });
-
-    for (let i = 0; i < chainEntries.length; i++) {
-      const [chain, addrSet] = chainEntries[i];
-      const addrs = [...addrSet];
-      const gtChain = gtChainFor(chain);
-      const batches = _.chunk(addrs, 30);
-      for (const batch of batches) {
-        try {
-          const res = await fetch(withKey(`${GT_BASE}/simple/networks/${gtChain}/token_price/${batch.join(',')}?include_24hr_price_change=true&include_24hr_vol=true&include_total_reserve_in_usd=true`));
-          if (!res.ok) { errors.push(`${chain} batch: ${res.status}`); continue; }
-          const data = await res.json();
-          const prices = data.data?.attributes?.token_prices || {};
-          const changes = data.data?.attributes?.h24_price_change_percentage || {};
-          const vols = data.data?.attributes?.h24_volume_usd || {};
-          const reserves = data.data?.attributes?.total_reserve_in_usd || {};
-          for (const addr of batch) {
-            const lower = addr.toLowerCase();
-            const price = parseFloat(prices[lower] ?? prices[addr]);
-            if (!isNaN(price)) {
-              newLive[`${chain}:${lower}`] = {
-                usd: price,
-                change24h: parseFloat(changes[lower] ?? changes[addr]) || null,
-                liquidity: parseFloat(reserves[lower] ?? reserves[addr]) || 0,
-                volume24h: parseFloat(vols[lower] ?? vols[addr]) || null,
-              };
-            }
-          }
-        } catch (e) { errors.push(`${chain} fetch error`); }
-        await new Promise(r => setTimeout(r, 2100));
-      }
-      setRefreshProgress({ current: i + 1, total: chainEntries.length + (needBTC ? 1 : 0), task: 'Fetching live prices' });
-    }
-
-    if (needBTC) {
-      try {
-        const wbtc = '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599';
-        const res = await fetch(withKey(`${GT_BASE}/simple/networks/eth/token_price/${wbtc}?include_24hr_price_change=true`));
-        if (res.ok) {
-          const data = await res.json();
-          const prices = data.data?.attributes?.token_prices || {};
-          const changes = data.data?.attributes?.h24_price_change_percentage || {};
-          const p = parseFloat(prices[wbtc] ?? prices[wbtc.toLowerCase()]);
-          if (!isNaN(p)) newLive['cex:BTC'] = { usd: p, change24h: parseFloat(changes[wbtc] ?? changes[wbtc.toLowerCase()]) || null, liquidity: 0 };
-        }
-      } catch { errors.push('BTC fetch error'); }
-    }
-    setLivePrices(newLive);
-
-    setRefreshProgress({ current: 0, total: 0, task: 'Resolving pool addresses' });
-    const needHist = [];
-    for (const p of soiPositions) {
-      const t = tokenMap[p.id];
-      if (t?.status !== 'resolved' || !t.chain || !t.address || !p.acquisitionDate) continue;
-      const dateStr = p.acquisitionDate.toISOString().slice(0, 10);
-      const cacheKey = `${t.chain}:${t.address.toLowerCase()}:${dateStr}`;
-      if (historicalPrices[cacheKey] !== undefined) continue;
-      needHist.push({ posId: p.id, chain: t.chain, address: t.address, dateStr, ts: Math.floor(p.acquisitionDate.getTime() / 1000) });
-    }
-
-    const poolCache = {};
-    const newHist = { ...historicalPrices };
-    setRefreshProgress({ current: 0, total: needHist.length, task: 'Fetching historical prices' });
-
-    for (let i = 0; i < needHist.length; i++) {
-      const { chain, address, dateStr, ts } = needHist[i];
-      const gtChain = gtChainFor(chain);
-      const poolKey = `${chain}:${address.toLowerCase()}`;
-      const cacheKey = `${chain}:${address.toLowerCase()}:${dateStr}`;
-      try {
-        if (!poolCache[poolKey]) {
-          const poolRes = await fetch(withKey(`${GT_BASE}/networks/${gtChain}/tokens/${address}/pools?page=1`));
-          if (poolRes.ok) {
-            const pd = await poolRes.json();
-            const top = pd.data?.[0];
-            if (top?.attributes?.address) poolCache[poolKey] = top.attributes.address;
-          }
-          await new Promise(r => setTimeout(r, 250));
-        }
-        const poolAddr = poolCache[poolKey];
-        if (!poolAddr) { newHist[cacheKey] = null; continue; }
-        const beforeTs = ts + 86400 * 3;
-        const ohlcvRes = await fetch(withKey(`${GT_BASE}/networks/${gtChain}/pools/${poolAddr}/ohlcv/day?aggregate=1&before_timestamp=${beforeTs}&limit=10`));
-        if (!ohlcvRes.ok) { newHist[cacheKey] = null; continue; }
-        const od = await ohlcvRes.json();
-        const list = od.data?.attributes?.ohlcv_list || [];
-        let closest = null; let bestDiff = Infinity;
-        for (const c of list) {
-          const [cts, open, high, low, close] = c;
-          const diff = Math.abs(cts - ts);
-          if (cts <= ts + 86400 && diff < bestDiff) { bestDiff = diff; closest = close; }
-        }
-        if (closest === null && list.length) closest = list[list.length - 1][4];
-        newHist[cacheKey] = closest;
-      } catch { newHist[cacheKey] = null; }
-      await new Promise(r => setTimeout(r, 250));
-      if (i % 3 === 0) setRefreshProgress({ current: i + 1, total: needHist.length, task: 'Fetching historical prices' });
-    }
-    setHistoricalPrices(newHist);
-
-    const earliestAcq = _.min(soiPositions.map(p => p.acquisitionDate).filter(Boolean));
-    if (earliestAcq) {
-      setRefreshProgress({ current: 0, total: 0, task: 'Building NAV series' });
-      const dayMs = 86400000;
-      const start = Math.floor(earliestAcq.getTime() / dayMs) * dayMs;
-      const end = Math.floor(Date.now() / dayMs) * dayMs;
-
-      const uniqTokens = {};
-      for (const [posId, t] of Object.entries(tokenMap)) {
-        if (t?.status !== 'resolved' || !t.chain || !t.address) continue;
-        const k = `${t.chain}:${t.address.toLowerCase()}`;
-        if (!uniqTokens[k]) uniqTokens[k] = { chain: t.chain, address: t.address };
-      }
-
-      const seriesByToken = {};
-      const tokenEntries = Object.entries(uniqTokens);
-      for (let i = 0; i < tokenEntries.length; i++) {
-        const [key, { chain, address }] = tokenEntries[i];
-        setRefreshProgress({ current: i + 1, total: tokenEntries.length, task: 'Building NAV series' });
-        const gtChain = gtChainFor(chain);
-        const poolAddr = poolCache[key];
-        if (!poolAddr) continue;
-
-        const allCandles = [];
-        let before = Math.floor(Date.now() / 1000) + 86400;
-        const startTs = Math.floor(start / 1000);
-        for (let attempt = 0; attempt < 4; attempt++) {
-          try {
-            const res = await fetch(withKey(`${GT_BASE}/networks/${gtChain}/pools/${poolAddr}/ohlcv/day?aggregate=1&before_timestamp=${before}&limit=180`));
-            if (!res.ok) break;
-            const d = await res.json();
-            const list = d.data?.attributes?.ohlcv_list || [];
-            if (!list.length) break;
-            allCandles.push(...list);
-            const oldestTs = list[list.length - 1][0];
-            if (oldestTs <= startTs) break;
-            before = oldestTs;
-            await new Promise(r => setTimeout(r, 250));
-          } catch { break; }
-        }
-        const byDay = {};
-        for (const [cts, , , , close] of allCandles) {
-          const dayKey = Math.floor(cts * 1000 / dayMs) * dayMs;
-          byDay[dayKey] = close;
-        }
-        seriesByToken[key] = byDay;
-        await new Promise(r => setTimeout(r, 200));
-      }
-
-      const filled = {};
-      for (const [key, byDay] of Object.entries(seriesByToken)) {
-        filled[key] = {};
-        let last = null;
-        for (let d = start; d <= end; d += dayMs) {
-          if (byDay[d] !== undefined) last = byDay[d];
-          filled[key][d] = last;
-        }
-      }
-
-      const series = [];
-      for (let d = start; d <= end; d += dayMs) {
-        let total = 0;
-        for (const p of soiPositions) {
-          if (!p.acquisitionDate || p.quantity === null) continue;
-          const acqDay = Math.floor(p.acquisitionDate.getTime() / dayMs) * dayMs;
-          if (d < acqDay) continue;
-          const t = tokenMap[p.id];
-          if (t?.status === 'resolved' && t.chain && t.address) {
-            const key = `${t.chain}:${t.address.toLowerCase()}`;
-            const price = filled[key]?.[d];
-            if (price !== null && price !== undefined) total += p.quantity * price;
-            else total += p.soiMarketValue;
-          } else if (t?.status === 'cash') {
-            total += p.soiMarketValue;
-          } else {
-            total += p.soiMarketValue;
-          }
-        }
-        series.push({ date: d, value: total });
-      }
-      setPortfolioSeries(series);
-    }
-
-    setLastRefresh(new Date());
-    setRefreshing(false);
-    setRefreshProgress({ current: 0, total: 0, task: '' });
-    if (errors.length) setPriceErrors(errors);
-  }, [tokenMap, soiPositions, historicalPrices, withKey]);
-
-  useEffect(() => { if (stage === STAGES.DASHBOARD && !lastRefresh) refreshPrices(); }, [stage, lastRefresh, refreshPrices]);
-
-  const livePositions = useMemo(() => {
-    if (stage !== STAGES.DASHBOARD) return [];
-    return soiPositions.map(p => {
-      const t = tokenMap[p.id];
-      let priceKey = null;
-      if (t?.status === 'resolved') priceKey = `${t.chain}:${t.address.toLowerCase()}`;
-      else if (t?.status === 'cex' && t.symbol === 'BTC') priceKey = 'cex:BTC';
-
-      const live = priceKey ? livePrices[priceKey] : null;
-      const hasLive = !!live && live.usd !== null;
-      const isCash = t?.status === 'cash';
-
-      const livePrice = hasLive ? live.usd : (isCash ? 1 : null);
-      const change24h = hasLive ? live.change24h : null;
-      const currentValue = (livePrice !== null && p.quantity !== null)
-        ? p.quantity * livePrice
-        : p.soiMarketValue;
-
-      const dateStr = p.acquisitionDate ? p.acquisitionDate.toISOString().slice(0, 10) : null;
-      const histKey = (priceKey && dateStr) ? `${priceKey}:${dateStr}` : null;
-      const entryPrice = histKey ? historicalPrices[histKey] ?? null : null;
-      const entryValue = (entryPrice !== null && p.quantity !== null) ? p.quantity * entryPrice : p.costBasis;
-
-      const plSinceEntry = (entryValue !== null) ? currentValue - entryValue : null;
-      const returnSinceEntry = (entryValue !== null && entryValue !== 0) ? (plSinceEntry / entryValue) * 100 : null;
-      const plSinceSOI = currentValue - p.soiMarketValue;
-      const returnSinceSOI = p.soiMarketValue ? (plSinceSOI / p.soiMarketValue) * 100 : null;
-      const daysHeld = p.acquisitionDate ? daysBetween(p.acquisitionDate, new Date()) : null;
-
-      return {
-        ...p, hasLive, isCash, livePrice, change24h, currentValue,
-        entryPrice, entryValue, plSinceEntry, returnSinceEntry,
-        plSinceSOI, returnSinceSOI, daysHeld,
-        status: t?.status || 'unresolved',
-        chain: t?.chain, address: t?.address, tokenSymbol: t?.symbol, dex: t?.dex,
-        liquidity: live?.liquidity,
-      };
-    });
-  }, [soiPositions, tokenMap, livePrices, historicalPrices, stage]);
-
-  const totals = useMemo(() => {
-    if (!livePositions.length) return null;
-    const currentNAV = _.sumBy(livePositions, 'currentValue');
-    const soiNAV = _.sumBy(livePositions, 'soiMarketValue');
-    const hasCost = livePositions.some(p => p.costBasis !== null);
-    const costTotal = livePositions.reduce((s, p) => s + (p.costBasis ?? 0), 0);
-    const entryTotal = livePositions.reduce((s, p) => s + (p.entryValue ?? p.soiMarketValue), 0);
-    const withPct = livePositions.map(p => ({ ...p, pctNav: currentNAV > 0 ? (p.currentValue / currentNAV) * 100 : 0 }));
-    const sorted = _.orderBy(withPct, 'currentValue', 'desc');
-    return {
-      currentNAV, soiNAV, costTotal: hasCost ? costTotal : null, entryTotal,
-      plVsSOI: currentNAV - soiNAV,
-      returnVsSOI: soiNAV ? ((currentNAV - soiNAV) / soiNAV) * 100 : null,
-      plVsCost: hasCost ? currentNAV - costTotal : null,
-      returnVsCost: hasCost && costTotal > 0 ? ((currentNAV - costTotal) / costTotal) * 100 : null,
-      plVsEntry: currentNAV - entryTotal,
-      returnVsEntry: entryTotal ? ((currentNAV - entryTotal) / entryTotal) * 100 : null,
-      positionCount: livePositions.length,
-      liveCount: livePositions.filter(p => p.hasLive).length,
-      top10: _.sumBy(sorted.slice(0, 10), 'pctNav'),
-      top25: _.sumBy(sorted.slice(0, 25), 'pctNav'),
-      positions: withPct,
-      hasCost,
+    const commitment = {
+      id: uid(), clientId, managerId, soiId,
+      committed: parseNum(committed) || _.sumBy(positions, 'soiMarketValue'),
+      called: _.sumBy(positions, 'soiMarketValue'),
     };
-  }, [livePositions]);
 
-  const breakdown = (key) => {
-    if (!totals) return [];
-    const grouped = _.groupBy(totals.positions, key);
-    return _.orderBy(Object.entries(grouped).map(([k, items]) => ({
-      name: k || 'Unclassified', value: _.sumBy(items, 'currentValue'),
-      pct: _.sumBy(items, 'pctNav'), count: items.length,
-    })), 'value', 'desc');
+    nextStore = {
+      ...nextStore,
+      soIs: [...nextStore.soIs, soi],
+      commitments: [...nextStore.commitments, commitment],
+    };
+    updateStore(nextStore);
+    onDone();
   };
 
-  const sectorBreakdown = useMemo(() => breakdown('sector'), [totals]);
-  const typeBreakdown = useMemo(() => breakdown('assetType'), [totals]);
-  const liquidityBreakdown = useMemo(() => breakdown('liquidity'), [totals]);
-  const topHoldings = useMemo(() => totals ? _.orderBy(totals.positions, 'currentValue', 'desc').slice(0, 10) : [], [totals]);
-
-  const filteredTable = useMemo(() => {
-    if (!totals) return [];
-    let r = totals.positions;
-    if (sectorFilter !== 'all') r = r.filter(x => x.sector === sectorFilter);
-    if (typeFilter !== 'all') r = r.filter(x => x.assetType === typeFilter);
-    if (search) {
-      const s = search.toLowerCase();
-      r = r.filter(x => String(x.positionName).toLowerCase().includes(s) || String(x.ticker).toLowerCase().includes(s) || String(x.sector).toLowerCase().includes(s));
-    }
-    return _.orderBy(r, sortBy, sortDir);
-  }, [totals, search, sortBy, sortDir, sectorFilter, typeFilter]);
-
-  const toggleSort = (col) => {
-    if (sortBy === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
-    else { setSortBy(col); setSortDir('desc'); }
-  };
-
-  const sectorOptions = useMemo(() => totals ? ['all', ..._.uniq(totals.positions.map(p => p.sector)).sort()] : ['all'], [totals]);
-  const typeOptions = useMemo(() => totals ? ['all', ..._.uniq(totals.positions.map(p => p.assetType)).sort()] : ['all'], [totals]);
-
-  const containerStyle = { minHeight: '100vh', backgroundColor: CA_SKY, fontFamily: 'system-ui, -apple-system, sans-serif' };
-
-  if (stage === STAGES.UPLOAD) {
-    return (
-      <div style={containerStyle}>
-        <div className="max-w-5xl mx-auto px-6 py-8">
-          <Header />
-          <ApiKeyPanel apiKey={apiKey} setApiKey={setApiKey} />
-          <div onDragOver={(e) => e.preventDefault()} onDrop={onDrop} className="border-2 border-dashed rounded-lg p-16 text-center bg-white hover:bg-blue-50 mt-4" style={{ borderColor: CA_BLUE + '60' }}>
-            <Upload size={48} style={{ color: CA_BLUE, margin: '0 auto 16px' }} />
-            <div className="text-lg font-semibold mb-2" style={{ color: CA_BLUE }}>Drop SOI file here</div>
-            <div className="text-sm mb-4" style={{ color: CA_SLATE }}>or</div>
-            <label className="inline-block px-6 py-2.5 rounded cursor-pointer font-medium text-white hover:opacity-90" style={{ backgroundColor: CA_BLUE }}>
-              Browse files
-              <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])} />
-            </label>
-            <div className="text-xs mt-6" style={{ color: CA_SLATE }}>
-              Live on-chain pricing via <strong>CoinGecko /onchain</strong> · Uniswap, Jupiter, Raydium, PancakeSwap + 1,500 more across 200+ chains · Fully client-side
-            </div>
-          </div>
-          {loading && <div className="mt-6 flex items-center justify-center gap-3 p-4 rounded" style={{ backgroundColor: 'white', color: CA_BLUE }}><RefreshCw size={16} className="animate-spin" /> Parsing…</div>}
-          {error && <ErrorBanner msg={error} />}
-          <SecurityPanel />
+  return (
+    <Modal onClose={onClose} title={mode==='choose' ? 'Add a manager SOI' : mode==='manual' ? 'Manual entry' : `Import — ${fileName || 'SOI file'}`}>
+      {mode === 'choose' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-5">
+          <ChoiceCard icon={FileSpreadsheet} title="Upload SOI file" desc="Excel or CSV. We'll auto-detect columns."
+            onClick={() => { setMode('upload'); setStep(1); }} />
+          <ChoiceCard icon={Edit2} title="Enter manually" desc="Type positions by hand — useful for small books."
+            onClick={() => { setMode('manual'); setStep(3); setManualPositions([{ positionName: '', ticker: '', quantity: '', soiMarketValue: '', sectorId: 'infrastructure', acquisitionDate: '', assetType: 'Liquid Token' }]); }} />
         </div>
-      </div>
-    );
-  }
+      )}
 
-  if (stage === STAGES.SHEET_PICK && workbook) {
-    const names = Object.keys(workbook.sheets);
-    return (
-      <div style={containerStyle}>
-        <div className="max-w-3xl mx-auto px-6 py-8">
-          <Header fileName={fileName} />
-          <div className="bg-white rounded p-6" style={{ border: `1px solid ${CA_BLUE}20` }}>
-            <div className="flex items-center gap-2 mb-4"><FileSpreadsheet size={18} style={{ color: CA_BLUE }} /><div className="font-semibold" style={{ color: CA_BLUE }}>Select sheet</div></div>
-            <div className="space-y-2">
-              {names.map(n => {
-                const s = workbook.sheets[n];
-                const { scores } = autoMapColumns(s.headers);
-                const matched = Object.keys(scores).length;
-                const isBest = n === activeSheet;
-                return (
-                  <button key={n} onClick={() => { setActiveSheet(n); loadSheet(s); }} className="w-full text-left p-3 rounded border hover:bg-blue-50 flex items-center justify-between" style={{ borderColor: isBest ? CA_BLUE : CA_BLUE + '30', backgroundColor: isBest ? CA_SKY : 'white' }}>
-                    <div><div className="font-medium text-sm" style={{ color: CA_BLUE }}>{n}</div><div className="text-xs" style={{ color: CA_SLATE }}>{s.rows.length} rows · {s.headers.length} columns</div></div>
-                    <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: matched >= 3 ? CA_GREEN + '20' : CA_GOLD + '20', color: matched >= 3 ? CA_GREEN : CA_GOLD }}>{matched} matched{isBest && ' · recommended'}</div>
-                  </button>
-                );
-              })}
+      {mode === 'upload' && step === 1 && (
+        <div className="p-5">
+          <DropZone onFile={handleFile} loading={loading} />
+          {error && <div className="mt-3 text-xs" style={{color:RED}}>{error}</div>}
+        </div>
+      )}
+
+      {mode === 'upload' && step === 2 && (
+        <div className="p-5 space-y-4">
+          {Object.keys(sheets).length > 1 && (
+            <div>
+              <label className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Sheet</label>
+              <select value={sheetName} onChange={e=>switchSheet(e.target.value)}
+                className="w-full mt-1 px-3 py-2 rounded text-sm outline-none"
+                style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
+                {Object.keys(sheets).map(n => <option key={n} value={n}>{n} ({sheets[n].rows.length} rows)</option>)}
+              </select>
             </div>
-            <button onClick={reset} className="mt-4 text-sm flex items-center gap-1 hover:underline" style={{ color: CA_SLATE }}><ArrowLeft size={14} /> Upload different file</button>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {Object.entries(FIELDS).map(([field, def]) => (
+              <div key={field}>
+                <label className="text-xs flex items-center gap-2" style={{color:TEXT_DIM}}>
+                  {def.label}
+                  {def.required && <span style={{color:RED}}>*</span>}
+                  {autoScores[field] && <span className="text-[10px]" style={{color:ACCENT_2}}>auto</span>}
+                </label>
+                <select value={columnMap[field] || ''} onChange={e=>setColumnMap({...columnMap, [field]: e.target.value})}
+                  className="w-full mt-1 px-2 py-1.5 rounded text-sm outline-none"
+                  style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
+                  <option value="">— none —</option>
+                  {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          <div className="text-xs p-3 rounded" style={{backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px solid ${BORDER}`}}>
+            Detected <strong style={{color:TEXT}}>{parsedPositions.length}</strong> valid position{parsedPositions.length===1?'':'s'}.
+            {!columnMap.positionName && <span style={{color:RED}}> Missing Position Name.</span>}
+            {!columnMap.marketValue && !(columnMap.quantity && columnMap.price) && <span style={{color:RED}}> Need Market Value OR (Quantity + Price).</span>}
+          </div>
+          <div className="flex justify-between">
+            <button onClick={()=>setStep(1)} className="text-xs px-3 py-1.5 rounded flex items-center gap-1"
+              style={{color:TEXT_DIM, border: `1px solid ${BORDER}`}}><ArrowLeft size={12}/> Back</button>
+            <button onClick={()=>setStep(3)} disabled={!parsedPositions.length}
+              className="text-xs px-4 py-1.5 rounded font-medium"
+              style={{backgroundColor: ACCENT, color: BG, opacity: parsedPositions.length?1:0.4}}>
+              Continue →
+            </button>
           </div>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  if (stage === STAGES.MAP) {
-    const mapped = Object.keys(columnMap).length;
-    const previewRows = rows.slice(0, 3);
-    return (
-      <div style={containerStyle}>
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          <Header fileName={fileName} />
-          <div className="bg-white rounded p-6 mb-4" style={{ border: `1px solid ${CA_BLUE}20` }}>
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <div className="font-semibold text-base" style={{ color: CA_BLUE }}>Confirm column mapping</div>
-                <div className="text-sm mt-1" style={{ color: CA_SLATE }}>Auto-detected {mapped} of {Object.keys(FIELDS).length} fields. <span style={{ color: CA_GOLD }}>Quantity and Acquisition Date drive live MTM and return-since-entry.</span></div>
-              </div>
-              <div className="flex items-center gap-2">
-                {workbook && Object.keys(workbook.sheets).length > 1 && <button onClick={() => setStage(STAGES.SHEET_PICK)} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded border hover:bg-blue-50" style={{ color: CA_SLATE, borderColor: CA_BLUE + '30' }}><ArrowLeft size={12} /> Change sheet</button>}
-                <button onClick={reset} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded border hover:bg-blue-50" style={{ color: CA_SLATE, borderColor: CA_BLUE + '30' }}><ArrowLeft size={12} /> New file</button>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-              {Object.entries(FIELDS).map(([field, def]) => {
-                const isReq = REQUIRED_FOR_DASHBOARD.includes(field) || field === 'quantity' || field === 'acquisitionDate';
-                const selected = columnMap[field] || '';
-                return (
-                  <div key={field} className="flex items-center gap-3">
-                    <div className="w-44 flex-shrink-0">
-                      <div className="text-sm font-medium" style={{ color: CA_BLUE }}>{def.label}{isReq && <span style={{ color: CA_RED }}> *</span>}</div>
-                      {autoScores[field] && <div className="text-xs" style={{ color: CA_GREEN }}>auto-matched</div>}
-                    </div>
-                    <select value={selected} onChange={(e) => setColumnMap({ ...columnMap, [field]: e.target.value || undefined })} className="flex-1 px-2 py-1.5 text-sm rounded border outline-none" style={{ borderColor: selected ? CA_BLUE + '60' : CA_BLUE + '20', backgroundColor: selected ? CA_SKY : 'white' }}>
-                      <option value="">— not mapped —</option>
-                      {headers.map(h => <option key={h} value={h}>{h}</option>)}
+      {((mode === 'upload' && step === 3) || mode === 'manual') && (
+        <div className="p-5 space-y-4">
+          {/* Update-vs-new chooser — shown when user picks an existing manager with existing SOIs */}
+          {(() => {
+            if (isReplaceMode) return null; // coming from "Update holdings" already; no choice
+            const existingSois = assignManagerId && assignManagerId !== '__new__'
+              ? store.soIs.filter(s => s.managerId === assignManagerId)
+              : [];
+            if (!existingSois.length) return null;
+            const mgr = store.managers.find(m => m.id === assignManagerId);
+            return (
+              <div className="p-3 rounded" style={{backgroundColor: ACCENT+'11', border: `1px solid ${ACCENT}44`}}>
+                <div className="text-xs font-medium mb-2" style={{color: ACCENT_2}}>
+                  {mgr?.name} already has {existingSois.length} vintage{existingSois.length===1?'':'s'} in the store.
+                </div>
+                <div className="space-y-1.5">
+                  <label className="flex items-start gap-2 text-xs cursor-pointer">
+                    <input type="radio" checked={updateBehavior==='new'} onChange={()=>setUpdateBehavior('new')} />
+                    <span>
+                      <strong style={{color:TEXT}}>Create new vintage</strong>
+                      <span className="ml-1" style={{color:TEXT_DIM}}>— this is a different fund (e.g., Fund III vs Fund IV).</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-xs cursor-pointer">
+                    <input type="radio" checked={updateBehavior==='replace'} onChange={()=>setUpdateBehavior('replace')} />
+                    <span>
+                      <strong style={{color:TEXT}}>Update existing vintage</strong>
+                      <span className="ml-1" style={{color:TEXT_DIM}}>— this is a newer quarter for a fund already in the store. Overwrites holdings.</span>
+                    </span>
+                  </label>
+                </div>
+                {updateBehavior === 'replace' && (
+                  <div className="mt-3">
+                    <label className="text-[10px] uppercase tracking-wider" style={{color:TEXT_MUTE}}>Which vintage to update?</label>
+                    <select value={replaceTargetSoiId} onChange={e=>setReplaceTargetSoiId(e.target.value)}
+                      className="w-full mt-1 px-3 py-2 rounded text-sm outline-none"
+                      style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
+                      <option value="">— select —</option>
+                      {existingSois.map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.vintage} — as of {s.asOfDate || 'no date'} ({s.positions.length} positions)
+                        </option>
+                      ))}
                     </select>
                   </div>
-                );
-              })}
-            </div>
-            {error && <ErrorBanner msg={error} />}
-            <div className="mt-5 flex items-center justify-between">
-              <div className="text-xs" style={{ color: CA_SLATE }}>{rows.length} data rows · subtotals auto-filtered</div>
-              <button onClick={confirmMapping} className="px-5 py-2 rounded font-medium text-white hover:opacity-90 flex items-center gap-2" style={{ backgroundColor: CA_BLUE }}><CheckCircle2 size={16} /> Continue to token resolution</button>
-            </div>
-          </div>
-          <div className="bg-white rounded p-4" style={{ border: `1px solid ${CA_BLUE}20` }}>
-            <div className="text-sm font-semibold mb-2" style={{ color: CA_BLUE }}>Data preview</div>
-            <div className="overflow-x-auto">
-              <table className="text-xs w-full">
-                <thead style={{ backgroundColor: CA_SKY, color: CA_BLUE }}>
-                  <tr>{headers.map(h => { const mt = Object.entries(columnMap).find(([_, v]) => v === h); return <th key={h} className="px-2 py-1.5 text-left font-semibold whitespace-nowrap">{h}{mt && <div className="text-[10px] font-normal" style={{ color: CA_GREEN }}>→ {FIELDS[mt[0]].label}</div>}</th>; })}</tr>
-                </thead>
-                <tbody>{previewRows.map((r, i) => <tr key={i} style={{ backgroundColor: i % 2 ? 'white' : '#FAFCFE' }}>{headers.map(h => <td key={h} className="px-2 py-1.5 whitespace-nowrap" style={{ color: CA_SLATE }}>{String(r[h] ?? '').slice(0, 60)}</td>)}</tr>)}</tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (stage === STAGES.TOKENS) {
-    const resolved = soiPositions.filter(p => tokenMap[p.id]?.status === 'resolved').length;
-    const cex = soiPositions.filter(p => tokenMap[p.id]?.status === 'cex').length;
-    const cash = soiPositions.filter(p => tokenMap[p.id]?.status === 'cash').length;
-    const skip = soiPositions.filter(p => tokenMap[p.id]?.status === 'skip').length;
-    const unresolved = soiPositions.length - resolved - cex - cash - skip;
-
-    return (
-      <div style={containerStyle}>
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          <Header fileName={fileName} />
-          <div className="bg-white rounded p-6 mb-4" style={{ border: `1px solid ${CA_BLUE}20` }}>
-            {!apiKey && <div className="mb-4"><ApiKeyPanel apiKey={apiKey} setApiKey={setApiKey} /></div>}
-            {apiKey && <ApiKeyPanel apiKey={apiKey} setApiKey={setApiKey} compact />}
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <div className="font-semibold text-base flex items-center gap-2" style={{ color: CA_BLUE }}><Link2 size={18} /> Token resolution</div>
-                <div className="text-sm mt-1" style={{ color: CA_SLATE }}>Match positions to on-chain tokens via <strong>CoinGecko /onchain</strong>. Paste a contract address or search by name.</div>
+                )}
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {resolved > 0 && <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: CA_GREEN + '20', color: CA_GREEN }}>{resolved} DEX</div>}
-                {cex > 0 && <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: CA_BLUE + '20', color: CA_BLUE }}>{cex} CEX</div>}
-                {cash > 0 && <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: CA_ACCENT + '20', color: CA_ACCENT }}>{cash} cash</div>}
-                {skip > 0 && <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: CA_SLATE + '20', color: CA_SLATE }}>{skip} flat</div>}
-                {unresolved > 0 && <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: CA_GOLD + '20', color: CA_GOLD }}>{unresolved} unresolved</div>}
-                <button onClick={() => setStage(STAGES.MAP)} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded border hover:bg-blue-50" style={{ color: CA_SLATE, borderColor: CA_BLUE + '30' }}><ArrowLeft size={12} /> Back</button>
+            );
+          })()}
+
+          {/* Replace-mode banner (coming from "Update holdings" on SOI detail) */}
+          {isReplaceMode && prefilledSoi && (
+            <div className="p-3 rounded" style={{backgroundColor: GOLD+'11', border: `1px solid ${GOLD}44`}}>
+              <div className="flex items-center gap-2 text-xs font-medium" style={{color:GOLD}}>
+                <RefreshCw size={12} /> Updating holdings
+              </div>
+              <div className="text-xs mt-1" style={{color:TEXT_DIM}}>
+                Replacing <strong style={{color:TEXT}}>{prefilledManager?.name} {prefilledSoi.vintage}</strong>'s positions
+                (currently {prefilledSoi.positions.length} positions, as of {prefilledSoi.asOfDate || '—'}).
+                Set the new as-of date below.
               </div>
             </div>
-
-            {resolvingTokens && <div className="mb-4 text-xs flex items-center gap-2" style={{ color: CA_ACCENT }}><RefreshCw size={12} className="animate-spin" /> Auto-resolving…</div>}
-            {apiStatus === 'blocked' && <ErrorBanner msg="Network error reaching CoinGecko. Check network/extensions." />}
-            {apiStatus === 'bad_key' && <ErrorBanner msg="API key rejected. Double-check your Demo key (starts with CG-)." />}
-            {apiStatus === 'rate_limited' && <div className="mb-4 p-3 rounded text-xs" style={{ backgroundColor: '#FFF8E6', color: CA_GOLD, border: `1px solid ${CA_GOLD}40` }}>Rate limit hit (30/min). Wait a moment.</div>}
-
-            <div className="mb-3 flex items-center gap-2 flex-wrap">
-              <button onClick={() => {
-                const u = {};
-                for (const p of soiPositions) if (tokenMap[p.id]?.status !== 'resolved' && tokenMap[p.id]?.status !== 'cex' && tokenMap[p.id]?.status !== 'cash') u[p.id] = { status: 'skip' };
-                setTokenMap(prev => ({ ...prev, ...u }));
-              }} className="text-xs px-3 py-1.5 rounded border hover:bg-blue-50" style={{ color: CA_SLATE, borderColor: CA_BLUE + '30' }}>
-                Hold all remaining flat
-              </button>
-              <div className="text-xs" style={{ color: CA_SLATE }}>SAFEs / SAFTs / Warrants pre-flagged as flat</div>
-            </div>
-
-            <div className="space-y-2 max-h-[560px] overflow-y-auto">
-              {soiPositions.map(p => (
-                <TokenRow
-                  key={p.id}
-                  position={p}
-                  entry={tokenMap[p.id] || { status: 'unresolved' }}
-                  onUpdate={(upd) => setTokenMap(prev => ({ ...prev, [p.id]: upd }))}
-                  searchDexScreener={searchDexScreener}
-                  lookupByAddress={lookupByAddress}
-                />
-              ))}
-            </div>
-
-            <div className="mt-5 flex items-center justify-between">
-              <div className="text-xs" style={{ color: CA_SLATE }}>Unresolved = held flat at SOI mark.</div>
-              <button onClick={() => setStage(STAGES.DASHBOARD)} className="px-5 py-2 rounded font-medium text-white hover:opacity-90 flex items-center gap-2" style={{ backgroundColor: CA_BLUE }}><Zap size={16} /> Build live dashboard</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!totals) {
-    return <div style={containerStyle}><div className="max-w-3xl mx-auto p-8"><ErrorBanner msg="No valid positions." /><button onClick={() => setStage(STAGES.MAP)} className="mt-4 px-4 py-2 rounded text-white" style={{ backgroundColor: CA_BLUE }}>Back</button></div></div>;
-  }
-
-  return (
-    <div style={containerStyle}>
-      <div className="max-w-7xl mx-auto px-6 py-6">
-        <div className="flex items-center justify-between mb-6 pb-4 border-b" style={{ borderColor: CA_BLUE + '30' }}>
-          <div>
-            <div className="text-xs tracking-widest font-semibold" style={{ color: CA_ACCENT }}>CAMBRIDGE ASSOCIATES</div>
-            <h1 className="text-xl font-bold" style={{ color: CA_BLUE }}>SOI Live Monitoring</h1>
-            <div className="text-xs mt-0.5" style={{ color: CA_SLATE }}>
-              {fileName}{activeSheet && ` · ${activeSheet}`} · {totals.positionCount} positions · {totals.liveCount} live-priced
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {lastRefresh && <div className="text-xs flex items-center gap-1" style={{ color: CA_SLATE }}><Clock size={11} /> {lastRefresh.toLocaleTimeString()}</div>}
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium" style={{ backgroundColor: 'white', color: CA_GREEN, border: `1px solid ${CA_GREEN}40` }}><Lock size={12} /> In-browser</div>
-            <button onClick={refreshPrices} disabled={refreshing} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: CA_ACCENT }}><RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} /> {refreshing ? 'Updating…' : 'Refresh'}</button>
-            <button onClick={() => setStage(STAGES.TOKENS)} className="text-xs px-3 py-1.5 rounded border hover:bg-blue-50" style={{ color: CA_BLUE, borderColor: CA_BLUE + '30' }}>Remap</button>
-            <button onClick={reset} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-white hover:opacity-90" style={{ backgroundColor: CA_BLUE }}>New upload</button>
-          </div>
-        </div>
-
-        {refreshing && refreshProgress.total > 0 && (
-          <div className="mb-4 p-3 rounded text-xs flex items-center gap-3" style={{ backgroundColor: 'white', color: CA_ACCENT, border: `1px solid ${CA_ACCENT}40` }}>
-            <RefreshCw size={12} className="animate-spin" />
-            <div className="flex-1">
-              <div className="font-semibold">{refreshProgress.task}</div>
-              <div className="mt-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: CA_SKY }}>
-                <div className="h-full rounded-full transition-all" style={{ backgroundColor: CA_ACCENT, width: `${(refreshProgress.current / refreshProgress.total) * 100}%` }} />
-              </div>
-            </div>
-            <div className="tabular-nums">{refreshProgress.current} / {refreshProgress.total}</div>
-          </div>
-        )}
-
-        {priceErrors.length > 0 && (
-          <div className="mb-4 p-3 rounded text-xs flex items-start gap-2" style={{ backgroundColor: '#FFF8E6', color: CA_GOLD, border: `1px solid ${CA_GOLD}40` }}>
-            <AlertCircle size={14} /> <div><span className="font-semibold">Warnings:</span> {priceErrors.slice(0, 3).join(' · ')}{priceErrors.length > 3 && ` +${priceErrors.length - 3}`}</div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-5 gap-3 mb-6">
-          <KPI label="Current NAV" value={fmtCurrency(totals.currentNAV)} sub={`SOI: ${fmtCurrency(totals.soiNAV)}`} icon={<DollarSign size={14} />} />
-          <KPI label="P&L vs Entry" value={fmtCurrency(totals.plVsEntry)} sub={totals.returnVsEntry !== null ? fmtPct(totals.returnVsEntry) : undefined} positive={totals.plVsEntry >= 0} icon={totals.plVsEntry >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />} />
-          <KPI label="P&L vs SOI" value={fmtCurrency(totals.plVsSOI)} sub={totals.returnVsSOI !== null ? fmtPct(totals.returnVsSOI) : undefined} positive={totals.plVsSOI >= 0} icon={totals.plVsSOI >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />} />
-          <KPI label="P&L vs Cost" value={totals.hasCost ? fmtCurrency(totals.plVsCost) : 'n/a'} sub={totals.returnVsCost !== null ? fmtPct(totals.returnVsCost) : undefined} positive={totals.plVsCost >= 0} icon={<Activity size={14} />} />
-          <KPI label="Top 10 Conc." value={fmtPct(totals.top10)} sub={`Top 25: ${fmtPct(totals.top25)}`} icon={<Layers size={14} />} />
-        </div>
-
-        <Panel title="Portfolio NAV — Since Earliest Acquisition" right={<div className="text-xs" style={{ color: CA_SLATE }}>DEX-priced positions live · illiquid held flat at SOI mark</div>}>
-          {portfolioSeries.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={portfolioSeries} margin={{ left: 0, right: 20, top: 10 }}>
-                <defs><linearGradient id="navGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={CA_BLUE} stopOpacity={0.3} /><stop offset="95%" stopColor={CA_BLUE} stopOpacity={0.02} /></linearGradient></defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E9EE" />
-                <XAxis dataKey="date" tickFormatter={(d) => new Date(d).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })} tick={{ fontSize: 10, fill: CA_SLATE }} />
-                <YAxis tickFormatter={fmtCurrency} tick={{ fontSize: 10, fill: CA_SLATE }} />
-                <Tooltip formatter={(v) => fmtCurrency(v)} labelFormatter={(d) => new Date(d).toLocaleDateString()} />
-                <Area type="monotone" dataKey="value" stroke={CA_BLUE} strokeWidth={2} fill="url(#navGrad)" />
-                <ReferenceLine y={totals.soiNAV} stroke={CA_GOLD} strokeDasharray="4 4" label={{ value: 'SOI NAV', fontSize: 10, fill: CA_GOLD, position: 'right' }} />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="py-12 text-center text-sm" style={{ color: CA_SLATE }}>{refreshing ? <><RefreshCw size={16} className="inline animate-spin mr-2" /> Building series…</> : 'Click Refresh'}</div>
           )}
-        </Panel>
 
-        <div className="grid grid-cols-3 gap-4 my-6">
-          <DonutPanel title="Sector" data={sectorBreakdown} />
-          <DonutPanel title="Asset Type" data={typeBreakdown} />
-          <DonutPanel title="Liquidity" data={liquidityBreakdown} />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <Panel title="Top 10 by Current Value">
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={topHoldings} layout="vertical" margin={{ left: 0, right: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E9EE" />
-                <XAxis type="number" tickFormatter={fmtCurrency} tick={{ fontSize: 10, fill: CA_SLATE }} />
-                <YAxis type="category" dataKey="positionName" width={130} tick={{ fontSize: 10, fill: CA_SLATE }} />
-                <Tooltip formatter={(v) => fmtCurrency(v)} />
-                <Bar dataKey="currentValue" fill={CA_BLUE} radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Panel>
-          <Panel title="Return Since Entry — Winners & Losers">
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={_.orderBy(totals.positions.filter(p => p.returnSinceEntry !== null), 'returnSinceEntry', 'desc').slice(0, 5).concat(_.orderBy(totals.positions.filter(p => p.returnSinceEntry !== null), 'returnSinceEntry', 'asc').slice(0, 5))} layout="vertical" margin={{ left: 0, right: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E9EE" />
-                <XAxis type="number" tickFormatter={(v) => `${v.toFixed(0)}%`} tick={{ fontSize: 10, fill: CA_SLATE }} />
-                <YAxis type="category" dataKey="positionName" width={130} tick={{ fontSize: 10, fill: CA_SLATE }} />
-                <Tooltip formatter={(v) => fmtPct(v)} />
-                <Bar dataKey="returnSinceEntry" radius={[0, 3, 3, 0]}>
-                  {_.orderBy(totals.positions.filter(p => p.returnSinceEntry !== null), 'returnSinceEntry', 'desc').slice(0, 5).concat(_.orderBy(totals.positions.filter(p => p.returnSinceEntry !== null), 'returnSinceEntry', 'asc').slice(0, 5)).map((p, i) => <Cell key={i} fill={p.returnSinceEntry >= 0 ? CA_GREEN : CA_RED} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </Panel>
-        </div>
-
-        <Panel title="All Positions — Live">
-          <div className="flex gap-2 mb-3 flex-wrap">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: CA_SLATE }} />
-              <input type="text" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-8 pr-3 py-2 text-sm rounded border outline-none" style={{ borderColor: CA_BLUE + '30' }} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Hide client/manager/vintage/commitment fields in replace mode — they're fixed */}
+            {updateBehavior !== 'replace' && (
+              <>
+            <div>
+              <label className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Client</label>
+              <select value={assignClientId} onChange={e=>setAssignClientId(e.target.value)}
+                className="w-full mt-1 px-3 py-2 rounded text-sm outline-none"
+                style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
+                {store.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                <option value="__new__">+ New client…</option>
+              </select>
+              {assignClientId === '__new__' && (
+                <input value={newClientName} onChange={e=>setNewClientName(e.target.value)} placeholder="Client name"
+                  className="w-full mt-2 px-3 py-2 rounded text-sm outline-none"
+                  style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} />
+              )}
             </div>
-            <select value={sectorFilter} onChange={(e) => setSectorFilter(e.target.value)} className="px-3 py-2 text-sm rounded border outline-none" style={{ borderColor: CA_BLUE + '30' }}>{sectorOptions.map(s => <option key={s} value={s}>{s === 'all' ? 'All sectors' : s}</option>)}</select>
-            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="px-3 py-2 text-sm rounded border outline-none" style={{ borderColor: CA_BLUE + '30' }}>{typeOptions.map(t => <option key={t} value={t}>{t === 'all' ? 'All types' : t}</option>)}</select>
-            <div className="px-3 py-2 text-xs rounded flex items-center" style={{ backgroundColor: CA_SKY, color: CA_BLUE }}>{filteredTable.length} of {totals.positionCount}</div>
+            <div>
+              <label className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Manager</label>
+              <select value={assignManagerId} onChange={e=>setAssignManagerId(e.target.value)}
+                className="w-full mt-1 px-3 py-2 rounded text-sm outline-none"
+                style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
+                <option value="">— select —</option>
+                {store.managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                <option value="__new__">+ New manager…</option>
+              </select>
+              {(assignManagerId === '__new__' || (!assignManagerId && store.managers.length === 0)) && (
+                <input value={newManagerName} onChange={e=>setNewManagerName(e.target.value)} placeholder="Manager name (e.g., Dragonfly)"
+                  className="w-full mt-2 px-3 py-2 rounded text-sm outline-none"
+                  style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} />
+              )}
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Vintage / Fund Name</label>
+              <input value={vintage} onChange={e=>setVintage(e.target.value)} placeholder="e.g., Fund III, 2024 Vintage"
+                className="w-full mt-1 px-3 py-2 rounded text-sm outline-none"
+                style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Client Commitment (USD, optional)</label>
+              <input value={committed} onChange={e=>setCommitted(e.target.value)} placeholder="e.g., 25000000"
+                className="w-full mt-1 px-3 py-2 rounded text-sm outline-none"
+                style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} />
+              <div className="text-[10px] mt-1" style={{color:TEXT_MUTE}}>Defaults to the sum of position MVs if empty.</div>
+            </div>
+              </>
+            )}
+            {/* As-of Date is always shown (new + replace both need it) */}
+            <div>
+              <label className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>As-of Date</label>
+              <input type="date" value={asOfDate} onChange={e=>setAsOfDate(e.target.value)}
+                className="w-full mt-1 px-3 py-2 rounded text-sm outline-none"
+                style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} />
+            </div>
           </div>
-          <div className="overflow-x-auto" style={{ maxHeight: 520 }}>
-            <table className="w-full text-xs">
-              <thead style={{ backgroundColor: CA_BLUE, color: 'white', position: 'sticky', top: 0 }}>
-                <tr>
-                  <Th label="Position" col="positionName" sortBy={sortBy} sortDir={sortDir} onClick={toggleSort} />
-                  <Th label="Src" col="status" sortBy={sortBy} sortDir={sortDir} onClick={toggleSort} />
-                  <Th label="Qty" col="quantity" sortBy={sortBy} sortDir={sortDir} onClick={toggleSort} align="right" />
-                  <Th label="Entry $" col="entryPrice" sortBy={sortBy} sortDir={sortDir} onClick={toggleSort} align="right" />
-                  <Th label="Live $" col="livePrice" sortBy={sortBy} sortDir={sortDir} onClick={toggleSort} align="right" />
-                  <Th label="24h" col="change24h" sortBy={sortBy} sortDir={sortDir} onClick={toggleSort} align="right" />
-                  <Th label="Current MV" col="currentValue" sortBy={sortBy} sortDir={sortDir} onClick={toggleSort} align="right" />
-                  <Th label="P&L vs Entry" col="plSinceEntry" sortBy={sortBy} sortDir={sortDir} onClick={toggleSort} align="right" />
-                  <Th label="Return" col="returnSinceEntry" sortBy={sortBy} sortDir={sortDir} onClick={toggleSort} align="right" />
-                  <Th label="Days" col="daysHeld" sortBy={sortBy} sortDir={sortDir} onClick={toggleSort} align="right" />
-                  <Th label="% NAV" col="pctNav" sortBy={sortBy} sortDir={sortDir} onClick={toggleSort} align="right" />
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTable.map((p, i) => (
-                  <tr key={p.id} style={{ backgroundColor: i % 2 ? 'white' : '#FAFCFE' }} className="hover:bg-blue-50">
-                    <td className="px-3 py-2 font-medium" style={{ color: CA_BLUE }}>
-                      {p.positionName}
-                      {p.tokenSymbol && <span className="ml-1 text-[10px] font-normal" style={{ color: CA_SLATE }}>({p.tokenSymbol})</span>}
-                    </td>
-                    <td className="px-3 py-2"><StatusBadge status={p.status} chain={p.chain} dex={p.dex} /></td>
-                    <td className="px-3 py-2 text-right tabular-nums" style={{ color: CA_SLATE }}>{p.quantity !== null ? p.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 }) : '–'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums" style={{ color: CA_SLATE }}>{p.entryPrice !== null ? `$${p.entryPrice.toFixed(p.entryPrice < 1 ? 4 : 2)}` : '–'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-medium" style={{ color: CA_BLUE }}>{p.livePrice !== null ? `$${p.livePrice.toFixed(p.livePrice < 1 ? 4 : 2)}` : '–'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums" style={{ color: p.change24h === null ? CA_SLATE : (p.change24h >= 0 ? CA_GREEN : CA_RED) }}>{p.change24h !== null ? `${p.change24h >= 0 ? '+' : ''}${p.change24h.toFixed(2)}%` : '–'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-medium" style={{ color: CA_BLUE }}>{fmtCurrency(p.currentValue)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-medium" style={{ color: p.plSinceEntry === null ? CA_SLATE : (p.plSinceEntry >= 0 ? CA_GREEN : CA_RED) }}>{p.plSinceEntry !== null ? fmtCurrency(p.plSinceEntry) : '–'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-medium" style={{ color: p.returnSinceEntry === null ? CA_SLATE : (p.returnSinceEntry >= 0 ? CA_GREEN : CA_RED) }}>{p.returnSinceEntry !== null ? fmtPct(p.returnSinceEntry) : '–'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums" style={{ color: CA_SLATE }}>{p.daysHeld !== null ? p.daysHeld : '–'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums" style={{ color: CA_SLATE }}>{fmtPct(p.pctNav)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
 
-        <div className="mt-6 text-xs text-center" style={{ color: CA_SLATE }}>
-          Cambridge Associates · On-chain pricing via CoinGecko · All data client-side
+          {mode === 'manual' && (
+            <div className="space-y-2">
+              <div className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Positions</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr style={{color:TEXT_MUTE}}>
+                      <th className="text-left px-2 py-1">Name *</th>
+                      <th className="text-left px-2 py-1">Ticker</th>
+                      <th className="text-right px-2 py-1">Qty</th>
+                      <th className="text-right px-2 py-1">Market Value *</th>
+                      <th className="text-left px-2 py-1">Sector</th>
+                      <th className="text-left px-2 py-1">Acq Date</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manualPositions.map((p, i) => (
+                      <tr key={i}>
+                        <td className="px-1 py-1"><input value={p.positionName} onChange={e=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,positionName:e.target.value}:x))} className="w-full px-2 py-1 rounded text-xs outline-none" style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} /></td>
+                        <td className="px-1 py-1"><input value={p.ticker} onChange={e=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,ticker:e.target.value}:x))} className="w-20 px-2 py-1 rounded text-xs outline-none" style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} /></td>
+                        <td className="px-1 py-1"><input value={p.quantity} onChange={e=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,quantity:e.target.value}:x))} className="w-24 px-2 py-1 rounded text-xs text-right outline-none tabular-nums" style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} /></td>
+                        <td className="px-1 py-1"><input value={p.soiMarketValue} onChange={e=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,soiMarketValue:e.target.value}:x))} className="w-28 px-2 py-1 rounded text-xs text-right outline-none tabular-nums" style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} /></td>
+                        <td className="px-1 py-1">
+                          <select value={p.sectorId} onChange={e=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,sectorId:e.target.value}:x))}
+                            className="px-1 py-1 rounded text-xs outline-none" style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
+                            {SECTORS.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
+                            <option value="unclassified">Unclassified</option>
+                          </select>
+                        </td>
+                        <td className="px-1 py-1"><input type="date" value={p.acquisitionDate || ''} onChange={e=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,acquisitionDate:e.target.value}:x))} className="w-36 px-2 py-1 rounded text-xs outline-none" style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} /></td>
+                        <td><button onClick={()=>setManualPositions(manualPositions.filter((_,j)=>j!==i))} className="px-1.5 py-1 rounded" style={{color:TEXT_DIM}}><X size={12}/></button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button onClick={()=>setManualPositions([...manualPositions, { positionName: '', ticker: '', quantity: '', soiMarketValue: '', sectorId: 'infrastructure', acquisitionDate: '', assetType: 'Liquid Token' }])}
+                className="text-xs px-3 py-1.5 rounded flex items-center gap-1"
+                style={{color: TEXT_DIM, border: `1px dashed ${BORDER}`}}><Plus size={12}/> Add row</button>
+            </div>
+          )}
+
+          {mode === 'upload' && parsedPositions.length > 0 && (
+            <div className="text-xs p-3 rounded" style={{backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px solid ${BORDER}`}}>
+              Ready to save <strong style={{color:TEXT}}>{parsedPositions.length}</strong> positions, total MV <strong style={{color:TEXT}}>{fmtCurrency(_.sumBy(parsedPositions, 'soiMarketValue'))}</strong>.
+            </div>
+          )}
+
+          {error && <div className="text-xs" style={{color:RED}}>{error}</div>}
+
+          <div className="flex justify-between">
+            <button onClick={() => isReplaceMode ? onClose() : (mode === 'upload' ? setStep(2) : setMode('choose'))}
+              className="text-xs px-3 py-1.5 rounded flex items-center gap-1"
+              style={{color:TEXT_DIM, border: `1px solid ${BORDER}`}}><ArrowLeft size={12}/> {isReplaceMode ? 'Cancel' : 'Back'}</button>
+            <button onClick={finalize}
+              disabled={
+                (mode==='upload' && !parsedPositions.length) ||
+                (mode==='manual' && !manualPositions.some(p=>p.positionName && p.soiMarketValue)) ||
+                (updateBehavior === 'replace' && !replaceTargetSoiId)
+              }
+              className="text-xs px-4 py-1.5 rounded font-medium flex items-center gap-1"
+              style={{backgroundColor: updateBehavior === 'replace' ? GOLD : ACCENT, color: BG}}>
+              <Check size={12} /> {updateBehavior === 'replace' ? 'Replace holdings' : 'Save to store'}
+            </button>
+          </div>
         </div>
+      )}
+    </Modal>
+  );
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{backgroundColor: 'rgba(0,0,0,0.7)'}}>
+      <div className="rounded-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto"
+        style={{backgroundColor: PANEL, border: `1px solid ${BORDER}`}}>
+        <div className="flex items-center justify-between px-5 py-3 sticky top-0" style={{borderBottom: `1px solid ${BORDER}`, backgroundColor: PANEL}}>
+          <div className="text-sm font-semibold">{title}</div>
+          <button onClick={onClose} className="p-1 rounded" style={{color: TEXT_DIM}}><X size={16} /></button>
+        </div>
+        {children}
       </div>
     </div>
   );
 }
+function ChoiceCard({ icon: Icon, title, desc, onClick }) {
+  return (
+    <button onClick={onClick}
+      className="p-5 rounded-lg text-left transition-colors hover:border-opacity-80"
+      style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+      <Icon size={20} style={{color: ACCENT}} />
+      <div className="text-sm font-semibold mt-2">{title}</div>
+      <div className="text-xs mt-1" style={{color: TEXT_DIM}}>{desc}</div>
+    </button>
+  );
+}
+function DropZone({ onFile, loading }) {
+  const ref = useRef(null);
+  return (
+    <div onDragOver={e=>{e.preventDefault();}} onDrop={e=>{e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) onFile(f);}}
+      onClick={()=>ref.current?.click()}
+      className="p-10 rounded-lg text-center cursor-pointer transition-colors"
+      style={{border: `2px dashed ${BORDER}`, backgroundColor: PANEL_2}}>
+      <Upload size={28} style={{color:ACCENT}} className="mx-auto" />
+      <div className="mt-3 text-sm font-medium">{loading ? 'Parsing…' : 'Drop an SOI here or click to browse'}</div>
+      <div className="text-xs mt-1" style={{color:TEXT_DIM}}>.xlsx, .xls, or .csv — processed entirely in your browser</div>
+      <input ref={ref} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+        onChange={e=>{const f = e.target.files?.[0]; if (f) onFile(f);}} />
+    </div>
+  );
+}
 
-function TokenRow({ position, entry, onUpdate, searchDexScreener, lookupByAddress }) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [searchError, setSearchError] = useState(null);
-  const [searching, setSearching] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [addrInput, setAddrInput] = useState('');
-  const [addrChain, setAddrChain] = useState('ethereum');
-  const [addrLoading, setAddrLoading] = useState(false);
-  const timer = useRef();
+/* =============================================================================
+   SETTINGS DRAWER
+   ============================================================================= */
+function SettingsDrawer({ store, updateStore, onClose, onResetSeed }) {
+  const [apiKey, setApiKey] = useState(store.settings.cgApiKey || '');
+  const [showKey, setShowKey] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const [confirmingWipe, setConfirmingWipe] = useState(false);
 
-  useEffect(() => {
-    if (!open) { setResults([]); setSearchError(null); return; }
-    if (!query || query.length < 2) { setResults([]); setSearchError(null); return; }
-    clearTimeout(timer.current);
-    timer.current = setTimeout(async () => {
-      setSearching(true); setSearchError(null);
-      const { results: r, error } = await searchDexScreener(query);
-      setResults(r); setSearchError(error); setSearching(false);
-    }, 350);
-    return () => clearTimeout(timer.current);
-  }, [query, open, searchDexScreener]);
+  const saveKey = () => {
+    updateStore(s => ({ ...s, settings: { ...s.settings, cgApiKey: apiKey.trim() } }));
+  };
 
-  const resolveByAddress = async () => {
-    if (!addrInput.trim()) return;
-    setAddrLoading(true);
-    const addrType = isContractAddress(addrInput.trim());
-    const chain = addrType === 'solana' ? 'solana' : addrChain;
-    const res = await lookupByAddress(chain, addrInput.trim());
-    setAddrLoading(false);
-    if (res) {
-      onUpdate({ status: 'resolved', chain: res.chain, address: res.address, symbol: res.symbol, name: res.name, dex: res.dex, liquidity: res.liquidity });
-      setOpen(false); setAddrInput('');
-    } else {
-      setSearchError(`No liquid pool found for ${shortAddr(addrInput.trim())} on ${chain}`);
-    }
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `catena-export-${today()}.json`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  const importJSON = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (!parsed.clients || !parsed.managers || !parsed.soIs) throw new Error('Invalid file');
+        updateStore(parsed);
+        onClose();
+      } catch (e) { alert('Invalid Catena export file.'); }
+    };
+    reader.readAsText(file);
+  };
+
+  const wipe = () => {
+    updateStore(emptyStore());
+    onClose();
   };
 
   return (
-    <div className="flex items-start gap-3 p-3 rounded border" style={{ borderColor: CA_BLUE + '20', backgroundColor: 'white' }}>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate" style={{ color: CA_BLUE }}>{position.positionName}</div>
-        <div className="text-xs" style={{ color: CA_SLATE }}>
-          {position.ticker && <span>{position.ticker} · </span>}
-          {position.assetType} · Qty {position.quantity !== null ? position.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 }) : 'n/a'} · SOI MV {fmtCurrency(position.soiMarketValue)}
-        </div>
-      </div>
-      <div className="flex items-center gap-2 flex-shrink-0 relative" style={{ width: 440 }}>
-        {entry.status === 'resolved' && (
-          <div className="text-xs px-2 py-1 rounded flex items-center gap-1 truncate max-w-[260px]" style={{ backgroundColor: CA_GREEN + '15', color: CA_GREEN }}>
-            <CheckCircle2 size={11} />
-            <span className="truncate">{entry.symbol || entry.name} · {entry.chain} · {shortAddr(entry.address)}</span>
+    <Modal title="Settings" onClose={onClose}>
+      <div className="p-5 space-y-6">
+        {/* API Key */}
+        <div>
+          <div className="text-xs uppercase tracking-wider mb-2" style={{color:TEXT_MUTE}}>CoinGecko Demo API Key</div>
+          <div className="flex gap-2">
+            <div className="flex-1 flex items-center gap-2 rounded px-3 py-2" style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+              <Lock size={12} style={{color:TEXT_DIM}} />
+              <input type={showKey ? 'text' : 'password'} value={apiKey} onChange={e=>setApiKey(e.target.value)}
+                placeholder="CG-xxxxxxxxxxxxxxxxxxxxxxxx"
+                className="flex-1 bg-transparent text-sm outline-none" style={{color:TEXT}} />
+              <button onClick={()=>setShowKey(!showKey)} style={{color:TEXT_DIM}}>
+                {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+            <button onClick={saveKey} className="px-3 py-2 rounded text-xs font-medium"
+              style={{backgroundColor: ACCENT, color: BG}}>Save</button>
           </div>
-        )}
-        {entry.status === 'cex' && <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: CA_BLUE + '15', color: CA_BLUE }}>{entry.symbol} (CEX)</div>}
-        {entry.status === 'cash' && <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: CA_ACCENT + '15', color: CA_ACCENT }}>Cash / $1</div>}
-        {entry.status === 'skip' && <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: CA_SLATE + '15', color: CA_SLATE }}>Held flat</div>}
-        <div className="relative">
-          <button onClick={() => { setOpen(!open); setQuery(''); setAddrInput(''); setSearchError(null); }} className="text-xs px-2 py-1 rounded border hover:bg-blue-50" style={{ color: CA_BLUE, borderColor: CA_BLUE + '30' }}>
-            {entry.status === 'unresolved' ? 'Find' : 'Change'}
-          </button>
-          {open && (
-            <div className="absolute right-0 top-8 w-[420px] bg-white rounded shadow-lg border z-20 p-3" style={{ borderColor: CA_BLUE + '30' }}>
-              <div className="mb-3">
-                <div className="text-[10px] font-semibold mb-1" style={{ color: CA_SLATE }}>PASTE CONTRACT ADDRESS (fastest)</div>
+          <div className="text-xs mt-2" style={{color:TEXT_DIM}}>
+            Get a free Demo key at <span style={{color:ACCENT_2}}>coingecko.com/en/developers/dashboard</span>.
+            Key stored in localStorage only — never transmitted to any server except CoinGecko.
+          </div>
+        </div>
+
+        {/* Data */}
+        <div>
+          <div className="text-xs uppercase tracking-wider mb-2" style={{color:TEXT_MUTE}}>Data</div>
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={exportJSON}
+              className="px-3 py-2 rounded text-xs flex items-center gap-1.5"
+              style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
+              <Download size={12} /> Export all data (JSON)
+            </button>
+            <label className="px-3 py-2 rounded text-xs flex items-center gap-1.5 cursor-pointer"
+              style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
+              <Upload size={12} /> Import data (JSON)
+              <input type="file" accept=".json" className="hidden" onChange={e=>{const f = e.target.files?.[0]; if (f) importJSON(f);}} />
+            </label>
+          </div>
+          <div className="text-[11px] mt-2" style={{color:TEXT_MUTE}}>
+            All your clients, managers, SOIs, and preferences in one file. Take it offline, share it with a colleague, back it up.
+          </div>
+        </div>
+
+        {/* Danger zone */}
+        <div>
+          <div className="text-xs uppercase tracking-wider mb-2" style={{color:RED}}>Danger zone</div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between p-3 rounded" style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+              <div>
+                <div className="text-sm">Reset to seed data</div>
+                <div className="text-xs" style={{color:TEXT_DIM}}>Replace everything with the demo 4-vintage portfolio.</div>
+              </div>
+              {confirmingReset ? (
                 <div className="flex gap-1">
-                  <select value={addrChain} onChange={(e) => setAddrChain(e.target.value)} className="px-2 py-1.5 text-xs rounded border outline-none" style={{ borderColor: CA_BLUE + '30', width: 110 }}>
-                    {CHAINS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </select>
-                  <input type="text" placeholder="0x… or Solana address" value={addrInput} onChange={(e) => setAddrInput(e.target.value)} className="flex-1 px-2 py-1.5 text-xs rounded border outline-none font-mono" style={{ borderColor: CA_BLUE + '30' }} />
-                  <button onClick={resolveByAddress} disabled={addrLoading || !addrInput.trim()} className="text-xs px-2 py-1 rounded text-white disabled:opacity-50" style={{ backgroundColor: CA_BLUE }}>
-                    {addrLoading ? '…' : 'Go'}
-                  </button>
+                  <button onClick={onResetSeed} className="px-2 py-1 rounded text-xs font-medium" style={{backgroundColor: RED, color: TEXT}}>Confirm</button>
+                  <button onClick={()=>setConfirmingReset(false)} className="px-2 py-1 rounded text-xs" style={{color: TEXT_DIM, border: `1px solid ${BORDER}`}}>Cancel</button>
+                </div>
+              ) : (
+                <button onClick={()=>setConfirmingReset(true)} className="px-3 py-1.5 rounded text-xs"
+                  style={{color: TEXT_DIM, border: `1px solid ${BORDER}`}}>Reset</button>
+              )}
+            </div>
+            <div className="flex items-center justify-between p-3 rounded" style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+              <div>
+                <div className="text-sm">Wipe all data</div>
+                <div className="text-xs" style={{color:TEXT_DIM}}>Remove all clients, managers, and SOIs. Cannot be undone.</div>
+              </div>
+              {confirmingWipe ? (
+                <div className="flex gap-1">
+                  <button onClick={wipe} className="px-2 py-1 rounded text-xs font-medium" style={{backgroundColor: RED, color: TEXT}}>Wipe</button>
+                  <button onClick={()=>setConfirmingWipe(false)} className="px-2 py-1 rounded text-xs" style={{color: TEXT_DIM, border: `1px solid ${BORDER}`}}>Cancel</button>
+                </div>
+              ) : (
+                <button onClick={()=>setConfirmingWipe(true)} className="px-3 py-1.5 rounded text-xs flex items-center gap-1"
+                  style={{color: RED, border: `1px solid ${RED}44`}}>
+                  <Trash2 size={12} /> Wipe
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Clients management */}
+        <div>
+          <div className="text-xs uppercase tracking-wider mb-2" style={{color:TEXT_MUTE}}>Clients ({store.clients.length})</div>
+          <div className="space-y-1">
+            {store.clients.map(c => (
+              <div key={c.id} className="flex items-center justify-between p-2 rounded text-sm"
+                style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+                <div>{c.name}</div>
+                <div className="text-xs" style={{color:TEXT_DIM}}>
+                  {store.commitments.filter(x=>x.clientId===c.id).length} SOIs
                 </div>
               </div>
-
-              <div className="border-t pt-3" style={{ borderColor: CA_BLUE + '15' }}>
-                <div className="text-[10px] font-semibold mb-1" style={{ color: CA_SLATE }}>OR SEARCH BY NAME/SYMBOL</div>
-                <input autoFocus type="text" placeholder="e.g. plasma, XPL, bonk…" value={query} onChange={(e) => setQuery(e.target.value)} className="w-full px-2 py-1.5 text-sm rounded border outline-none" style={{ borderColor: CA_BLUE + '30' }} />
-              </div>
-
-              <div className="max-h-60 overflow-y-auto mt-2">
-                {query.length > 0 && query.length < 2 && <div className="text-xs p-2" style={{ color: CA_SLATE }}>2+ chars to search…</div>}
-                {searching && <div className="text-xs p-2 flex items-center gap-2" style={{ color: CA_ACCENT }}><RefreshCw size={11} className="animate-spin" /> Searching…</div>}
-                {searchError && <div className="text-xs p-2 rounded" style={{ backgroundColor: '#FDECEC', color: CA_RED }}><AlertCircle size={11} className="inline mr-1" /> {searchError}</div>}
-                {!searching && !searchError && query.length >= 2 && results.length === 0 && <div className="text-xs p-2" style={{ color: CA_SLATE }}>No liquid pools found for "{query}"</div>}
-                {results.map(r => (
-                  <button
-                    key={`${r.chain}:${r.address}`}
-                    onClick={() => { onUpdate({ status: 'resolved', chain: r.chain, address: r.address, symbol: r.symbol, name: r.name, dex: r.dex, liquidity: r.liquidity }); setOpen(false); setQuery(''); }}
-                    className="w-full text-left p-2 hover:bg-blue-50 rounded flex items-center gap-2 text-xs"
-                  >
-                    {r.imageUrl && <img src={r.imageUrl} alt="" className="w-5 h-5 rounded-full flex-shrink-0" onError={(e) => e.target.style.display = 'none'} />}
-                    <div className="flex-1 min-w-0">
-                      <div className="truncate" style={{ color: CA_BLUE }}><strong>{r.symbol}</strong> · {r.name}</div>
-                      <div className="truncate" style={{ color: CA_SLATE }}>{r.chain} · {r.dex} · liq {fmtCurrency(r.liquidity)} · {shortAddr(r.address)}</div>
-                    </div>
-                    {r.priceUsd && <div className="text-right tabular-nums" style={{ color: CA_BLUE }}>${r.priceUsd < 1 ? r.priceUsd.toFixed(4) : r.priceUsd.toFixed(2)}</div>}
-                  </button>
-                ))}
-              </div>
-
-              <div className="border-t mt-2 pt-2 flex gap-2 flex-wrap" style={{ borderColor: CA_BLUE + '15' }}>
-                <button onClick={() => { onUpdate({ status: 'cex', symbol: 'BTC' }); setOpen(false); }} className="text-xs px-2 py-1 rounded hover:bg-blue-50" style={{ color: CA_BLUE }}>Is BTC</button>
-                <button onClick={() => { onUpdate({ status: 'cash' }); setOpen(false); }} className="text-xs px-2 py-1 rounded hover:bg-blue-50" style={{ color: CA_ACCENT }}>Cash</button>
-                <button onClick={() => { onUpdate({ status: 'skip' }); setOpen(false); }} className="text-xs px-2 py-1 rounded hover:bg-blue-50" style={{ color: CA_SLATE }}>Hold flat</button>
-                {entry.status !== 'unresolved' && <button onClick={() => { onUpdate({ status: 'unresolved' }); setOpen(false); }} className="text-xs px-2 py-1 rounded hover:bg-blue-50" style={{ color: CA_GOLD }}>Clear</button>}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatusBadge({ status, chain, dex }) {
-  if (status === 'resolved') return <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: CA_GREEN + '20', color: CA_GREEN }} title={`${chain} · ${dex || 'DEX'}`}>{chain?.slice(0, 3).toUpperCase() || 'DEX'}</span>;
-  if (status === 'cex') return <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: CA_BLUE + '20', color: CA_BLUE }}>CEX</span>;
-  if (status === 'cash') return <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: CA_ACCENT + '20', color: CA_ACCENT }}>Cash</span>;
-  if (status === 'skip') return <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: CA_SLATE + '20', color: CA_SLATE }}>Flat</span>;
-  return <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: CA_GOLD + '20', color: CA_GOLD }}>?</span>;
-}
-
-function ApiKeyPanel({ apiKey, setApiKey, compact }) {
-  const [local, setLocal] = useState(apiKey);
-  const [showHelp, setShowHelp] = useState(false);
-  const isSet = !!apiKey;
-
-  if (compact && isSet) return (
-    <div className="mb-3 flex items-center justify-between p-2 rounded text-xs" style={{ backgroundColor: CA_GREEN + '10', border: `1px solid ${CA_GREEN}30` }}>
-      <div className="flex items-center gap-2" style={{ color: CA_GREEN }}>
-        <CheckCircle2 size={12} /> API key set · {apiKey.slice(0, 6)}…{apiKey.slice(-4)}
-      </div>
-      <button onClick={() => setApiKey('')} className="text-xs hover:underline" style={{ color: CA_SLATE }}>Change</button>
-    </div>
-  );
-
-  return (
-    <div className="rounded p-4" style={{ backgroundColor: isSet ? 'white' : '#FFF8E6', border: `1px solid ${isSet ? CA_GREEN : CA_GOLD}40` }}>
-      <div className="flex items-start gap-3">
-        <div className="flex-shrink-0 mt-0.5">
-          {isSet ? <CheckCircle2 size={18} style={{ color: CA_GREEN }} /> : <AlertCircle size={18} style={{ color: CA_GOLD }} />}
-        </div>
-        <div className="flex-1">
-          <div className="text-sm font-semibold mb-1" style={{ color: isSet ? CA_GREEN : CA_GOLD }}>
-            {isSet ? 'CoinGecko Demo API key set' : 'Paste your free CoinGecko Demo API key'}
-          </div>
-          {!isSet && (
-            <div className="text-xs mb-2" style={{ color: CA_SLATE }}>
-              Required for live prices. <strong>Free, no credit card</strong> — sign up at <a href="https://www.coingecko.com/en/api/pricing" target="_blank" rel="noreferrer" className="underline" style={{ color: CA_ACCENT }}>coingecko.com/api</a>, copy your key (starts with <code>CG-</code>), paste below. Stored only in-memory for this session; cleared on reload.
-            </div>
-          )}
-          <div className="flex gap-2">
-            <input
-              type="password"
-              placeholder="CG-xxxxxxxxxxxxxxxxxxxx"
-              value={local}
-              onChange={(e) => setLocal(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && local.trim()) setApiKey(local.trim()); }}
-              className="flex-1 px-3 py-2 text-sm rounded border outline-none font-mono"
-              style={{ borderColor: CA_BLUE + '30' }}
-            />
-            <button
-              onClick={() => setApiKey(local.trim())}
-              disabled={!local.trim()}
-              className="px-4 py-2 rounded text-sm font-medium text-white hover:opacity-90 disabled:opacity-40"
-              style={{ backgroundColor: CA_BLUE }}
-            >
-              {isSet ? 'Update' : 'Save'}
-            </button>
-            {isSet && (
-              <button onClick={() => { setApiKey(''); setLocal(''); }} className="px-3 py-2 rounded text-xs border hover:bg-blue-50" style={{ color: CA_SLATE, borderColor: CA_BLUE + '30' }}>Clear</button>
-            )}
+            ))}
           </div>
         </div>
       </div>
-    </div>
+    </Modal>
   );
-}
-
-function Header({ fileName }) {
-  return (
-    <div className="flex items-center justify-between mb-6 pb-4 border-b" style={{ borderColor: CA_BLUE + '30' }}>
-      <div>
-        <div className="text-xs tracking-widest font-semibold mb-1" style={{ color: CA_ACCENT }}>CAMBRIDGE ASSOCIATES</div>
-        <h1 className="text-2xl font-bold" style={{ color: CA_BLUE }}>SOI Live Monitoring</h1>
-        <div className="text-sm mt-1" style={{ color: CA_SLATE }}>{fileName ? <>File: <span className="font-medium">{fileName}</span></> : 'On-chain pricing via CoinGecko · Uniswap, Jupiter, Raydium + 1,500 more DEXs'}</div>
-      </div>
-      <div className="flex items-center gap-2 px-3 py-2 rounded text-xs font-medium" style={{ backgroundColor: 'white', color: CA_GREEN, border: `1px solid ${CA_GREEN}40` }}><Lock size={14} /> Client-side only</div>
-    </div>
-  );
-}
-
-function ErrorBanner({ msg }) { return <div className="mt-4 flex items-start gap-3 p-4 rounded" style={{ backgroundColor: '#FDECEC', color: CA_RED, border: `1px solid ${CA_RED}40` }}><AlertCircle size={18} /><div><div className="font-semibold">Issue</div><div className="text-sm">{msg}</div></div></div>; }
-
-function SecurityPanel() {
-  return (
-    <div className="mt-8 p-6 rounded" style={{ backgroundColor: 'white', border: `1px solid ${CA_BLUE}20` }}>
-      <div className="flex items-start gap-3">
-        <Shield size={18} style={{ color: CA_GREEN, marginTop: 2 }} />
-        <div className="text-sm" style={{ color: CA_SLATE }}>
-          <div className="font-semibold mb-1" style={{ color: CA_BLUE }}>Data source</div>
-          <strong>CoinGecko /onchain</strong> indexes every pool across 1,500+ DEXs on 200+ chains. Free Demo tier, CORS-enabled with API key, 30 calls/min. Provides both live prices and historical OHLCV. SOI parsing stays fully client-side; outbound calls are anonymous token/pool queries only.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function KPI({ label, value, sub, positive, icon }) {
-  return (
-    <div className="bg-white rounded p-4" style={{ border: `1px solid ${CA_BLUE}20` }}>
-      <div className="flex items-center gap-1.5 text-xs mb-2" style={{ color: CA_SLATE }}>{icon} {label}</div>
-      <div className="text-xl font-bold" style={{ color: CA_BLUE }}>{value}</div>
-      {sub && <div className="text-xs mt-0.5 font-medium" style={{ color: positive === undefined ? CA_SLATE : (positive ? CA_GREEN : CA_RED) }}>{sub}</div>}
-    </div>
-  );
-}
-
-function Panel({ title, children, right }) {
-  return (
-    <div className="bg-white rounded p-4" style={{ border: `1px solid ${CA_BLUE}20` }}>
-      <div className="flex items-center justify-between mb-3"><div className="text-sm font-semibold" style={{ color: CA_BLUE }}>{title}</div>{right}</div>
-      {children}
-    </div>
-  );
-}
-
-function DonutPanel({ title, data }) {
-  return (
-    <Panel title={title}>
-      <ResponsiveContainer width="100%" height={240}>
-        <PieChart>
-          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={85} innerRadius={50} paddingAngle={1}>
-            {data.map((_e, i) => <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />)}
-          </Pie>
-          <Tooltip formatter={(v, _n, p) => [`${fmtCurrency(v)} (${fmtPct(p.payload.pct)})`, p.payload.name]} />
-        </PieChart>
-      </ResponsiveContainer>
-      <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
-        {data.slice(0, 6).map((d, i) => (
-          <div key={d.name} className="flex items-center gap-1.5 truncate">
-            <div className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: CHART_PALETTE[i % CHART_PALETTE.length] }} />
-            <span className="truncate" style={{ color: CA_SLATE }}>{d.name}</span>
-            <span className="ml-auto tabular-nums font-medium" style={{ color: CA_BLUE }}>{fmtPct(d.pct)}</span>
-          </div>
-        ))}
-      </div>
-    </Panel>
-  );
-}
-
-function Th({ label, col, sortBy, sortDir, onClick, align = 'left' }) {
-  const active = sortBy === col;
-  return <th onClick={() => onClick(col)} className="px-3 py-2 text-xs font-semibold cursor-pointer select-none hover:opacity-80" style={{ textAlign: align }}>{label}{active ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}</th>;
 }
