@@ -989,6 +989,8 @@ export default function SOIDashboard() {
         <SettingsDrawer
           store={store}
           updateStore={updateStore}
+          selection={selection}
+          setSelection={setSelection}
           onClose={() => setSettingsOpen(false)}
           onResetSeed={() => { const s = seedStore(); setStore(s); setLivePrices({}); setSelection({kind:'client', id:s.clients[0].id}); setSettingsOpen(false); }}
         />
@@ -2641,7 +2643,48 @@ function DropZone({ onFile, loading }) {
 /* =============================================================================
    SETTINGS DRAWER
    ============================================================================= */
-function SettingsDrawer({ store, updateStore, onClose, onResetSeed }) {
+function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, onResetSeed }) {
+  const managerById = useMemo(() => Object.fromEntries(store.managers.map(m => [m.id, m])), [store.managers]);
+
+  const renameClient = (id, name) => updateStore(s => ({
+    ...s, clients: s.clients.map(c => c.id === id ? { ...c, name } : c),
+  }));
+  const deleteClient = (id) => {
+    updateStore(s => ({
+      ...s,
+      clients: s.clients.filter(c => c.id !== id),
+      commitments: s.commitments.filter(c => c.clientId !== id),
+    }));
+    if (selection?.kind === 'client' && selection.id === id) setSelection({ kind: 'all' });
+  };
+
+  const renameManager = (id, name) => updateStore(s => ({
+    ...s, managers: s.managers.map(m => m.id === id ? { ...m, name } : m),
+  }));
+  const deleteManager = (id) => {
+    const killedSoiIds = new Set(store.soIs.filter(x => x.managerId === id).map(x => x.id));
+    updateStore(s => ({
+      ...s,
+      managers: s.managers.filter(m => m.id !== id),
+      soIs: s.soIs.filter(x => x.managerId !== id),
+      commitments: s.commitments.filter(c => c.managerId !== id && !killedSoiIds.has(c.soiId)),
+    }));
+    if (selection?.kind === 'manager' && selection.id === id) setSelection({ kind: 'all' });
+    if (selection?.kind === 'soi' && killedSoiIds.has(selection.id)) setSelection({ kind: 'all' });
+  };
+
+  const renameSOI = (id, vintage) => updateStore(s => ({
+    ...s, soIs: s.soIs.map(x => x.id === id ? { ...x, vintage } : x),
+  }));
+  const deleteSOI = (id) => {
+    updateStore(s => ({
+      ...s,
+      soIs: s.soIs.filter(x => x.id !== id),
+      commitments: s.commitments.filter(c => c.soiId !== id),
+    }));
+    if (selection?.kind === 'soi' && selection.id === id) setSelection({ kind: 'all' });
+  };
+
   const [apiKey, setApiKey] = useState(store.settings.cgApiKey || '');
   const [showKey, setShowKey] = useState(false);
   const [confirmingReset, setConfirmingReset] = useState(false);
@@ -2761,22 +2804,157 @@ function SettingsDrawer({ store, updateStore, onClose, onResetSeed }) {
           </div>
         </div>
 
-        {/* Clients management */}
+        {/* Manage */}
         <div>
-          <div className="text-xs uppercase tracking-wider mb-2" style={{color:TEXT_MUTE}}>Clients ({store.clients.length})</div>
-          <div className="space-y-1">
-            {store.clients.map(c => (
-              <div key={c.id} className="flex items-center justify-between p-2 rounded text-sm"
-                style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
-                <div>{c.name}</div>
-                <div className="text-xs" style={{color:TEXT_DIM}}>
-                  {store.commitments.filter(x=>x.clientId===c.id).length} SOIs
-                </div>
-              </div>
-            ))}
+          <div className="text-xs uppercase tracking-wider mb-2" style={{color:TEXT_MUTE}}>Manage</div>
+
+          {/* Clients */}
+          <div className="mb-4">
+            <div className="text-[11px] mb-1.5 flex items-center gap-1.5" style={{color: TEXT_DIM}}>
+              <Users size={11} /> Clients ({store.clients.length})
+            </div>
+            <div className="space-y-1">
+              {store.clients.length === 0 && (
+                <div className="text-xs italic px-2 py-1" style={{color: TEXT_MUTE}}>No clients yet. Import an SOI to create one.</div>
+              )}
+              {store.clients.map(c => {
+                const count = store.commitments.filter(x => x.clientId === c.id).length;
+                return (
+                  <ManageRow
+                    key={c.id}
+                    title={c.name}
+                    subtitle={`${count} commitment${count===1?'':'s'}`}
+                    editFields={[{ label: 'Name', value: c.name, placeholder: 'Client name' }]}
+                    onSave={([name]) => { if (name) renameClient(c.id, name); }}
+                    onDelete={() => deleteClient(c.id)}
+                    deleteWarning={count > 0 ? `Also removes ${count} commitment${count===1?'':'s'}` : ''}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Managers */}
+          <div className="mb-4">
+            <div className="text-[11px] mb-1.5 flex items-center gap-1.5" style={{color: TEXT_DIM}}>
+              <Briefcase size={11} /> Managers ({store.managers.length})
+            </div>
+            <div className="space-y-1">
+              {store.managers.length === 0 && (
+                <div className="text-xs italic px-2 py-1" style={{color: TEXT_MUTE}}>No managers yet.</div>
+              )}
+              {store.managers.map(m => {
+                const soiCount = store.soIs.filter(x => x.managerId === m.id).length;
+                const commitCount = store.commitments.filter(x => x.managerId === m.id).length;
+                const subtitle = [m.firm, `${soiCount} SOI${soiCount===1?'':'s'}`, `${commitCount} commitment${commitCount===1?'':'s'}`].filter(Boolean).join(' · ');
+                return (
+                  <ManageRow
+                    key={m.id}
+                    title={m.name}
+                    subtitle={subtitle}
+                    editFields={[
+                      { label: 'Name', value: m.name, placeholder: 'Manager name' },
+                      { label: 'Firm',  value: m.firm || '', placeholder: 'Firm (optional)' },
+                    ]}
+                    onSave={([name, firm]) => { if (name) updateStore(s => ({ ...s, managers: s.managers.map(x => x.id === m.id ? { ...x, name, firm } : x) })); }}
+                    onDelete={() => deleteManager(m.id)}
+                    deleteWarning={`Also removes ${soiCount} SOI${soiCount===1?'':'s'} and ${commitCount} commitment${commitCount===1?'':'s'}`}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          {/* SOIs */}
+          <div>
+            <div className="text-[11px] mb-1.5 flex items-center gap-1.5" style={{color: TEXT_DIM}}>
+              <Building2 size={11} /> SOIs ({store.soIs.length})
+            </div>
+            <div className="space-y-1">
+              {store.soIs.length === 0 && (
+                <div className="text-xs italic px-2 py-1" style={{color: TEXT_MUTE}}>No SOIs yet.</div>
+              )}
+              {store.soIs.map(x => {
+                const mgr = managerById[x.managerId];
+                const commitCount = store.commitments.filter(c => c.soiId === x.id).length;
+                const posCount = x.positions?.length || 0;
+                return (
+                  <ManageRow
+                    key={x.id}
+                    title={`${mgr?.name || 'Unknown manager'} — ${x.vintage || '(no vintage)'}`}
+                    subtitle={`${posCount} position${posCount===1?'':'s'} · as of ${x.asOfDate || '—'} · ${commitCount} commitment${commitCount===1?'':'s'}`}
+                    editFields={[{ label: 'Vintage label', value: x.vintage || '', placeholder: 'e.g. Fund III' }]}
+                    onSave={([vintage]) => renameSOI(x.id, vintage)}
+                    onDelete={() => deleteSOI(x.id)}
+                    deleteWarning={commitCount > 0 ? `Also removes ${commitCount} commitment${commitCount===1?'':'s'}` : ''}
+                  />
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
     </Modal>
+  );
+}
+
+function ManageRow({ title, subtitle, editFields, onSave, onDelete, deleteWarning }) {
+  const [editing, setEditing] = useState(false);
+  const [values, setValues] = useState(() => editFields.map(f => f.value ?? ''));
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const startEdit = () => { setValues(editFields.map(f => f.value ?? '')); setEditing(true); };
+  const save = () => { onSave(values.map(v => String(v).trim())); setEditing(false); };
+  const cancel = () => setEditing(false);
+
+  if (editing) {
+    return (
+      <div className="p-2 rounded space-y-2" style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+        {editFields.map((f, i) => (
+          <div key={i}>
+            <div className="text-[10px] uppercase tracking-wider mb-1" style={{color: TEXT_MUTE}}>{f.label}</div>
+            <input
+              autoFocus={i===0}
+              value={values[i]}
+              onChange={e => setValues(v => v.map((x, j) => j===i ? e.target.value : x))}
+              onKeyDown={e => { if (e.key==='Enter') save(); if (e.key==='Escape') cancel(); }}
+              placeholder={f.placeholder || ''}
+              className="w-full px-2 py-1.5 rounded text-sm outline-none"
+              style={{backgroundColor: PANEL, color: TEXT, border: `1px solid ${BORDER}`}}
+            />
+          </div>
+        ))}
+        <div className="flex justify-end gap-1">
+          <button onClick={save} className="px-2.5 py-1 rounded text-xs font-medium" style={{backgroundColor: ACCENT, color: BG}}>Save</button>
+          <button onClick={cancel} className="px-2.5 py-1 rounded text-xs" style={{color: TEXT_DIM, border: `1px solid ${BORDER}`}}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between p-2 rounded text-sm gap-2"
+      style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+      <div className="flex-1 min-w-0">
+        <div className="truncate">{title}</div>
+        {subtitle && <div className="text-[11px] truncate" style={{color: TEXT_DIM}}>{subtitle}</div>}
+      </div>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {confirmingDelete ? (
+          <>
+            {deleteWarning && <div className="text-[11px] mr-1" style={{color: TEXT_DIM}}>{deleteWarning}</div>}
+            <button onClick={() => { onDelete(); setConfirmingDelete(false); }}
+              className="px-2 py-1 rounded text-xs font-medium" style={{backgroundColor: RED, color: TEXT}}>Delete</button>
+            <button onClick={() => setConfirmingDelete(false)} className="px-2 py-1 rounded text-xs"
+              style={{color: TEXT_DIM, border: `1px solid ${BORDER}`}}>Cancel</button>
+          </>
+        ) : (
+          <>
+            <button onClick={startEdit} className="p-1 rounded" style={{color: TEXT_DIM}} title="Edit"><Edit2 size={14} /></button>
+            <button onClick={() => setConfirmingDelete(true)} className="p-1 rounded" style={{color: RED}} title="Delete"><Trash2 size={14} /></button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
