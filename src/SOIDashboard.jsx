@@ -193,14 +193,15 @@ const today = () => new Date().toISOString().slice(0,10);
    {
      clients:   [{id, name, notes}]
      managers:  [{id, name, firm}]                 (e.g., "Meridian Digital Capital IV")
-     soIs:      [{id, managerId, vintage, asOfDate, notes,
-                  positions: [ {id, positionName, ticker, quantity, soiPrice,
-                               costBasis, soiMarketValue, acquisitionDate, assetType,
-                               sectorId,          // our canonical GICS bucket
-                               forceLiquid,       // user flipped "mark as liquid after TGE"
-                               cgTokenId,         // optional: resolved CoinGecko coin id for live price
-                               chain, address,    // optional: onchain identity
-                               notes} ] }]
+     soIs:      [{id, managerId, vintage,
+                  snapshots: [{id, asOfDate, notes,
+                    positions: [ {id, positionName, ticker, quantity, soiPrice,
+                                 costBasis, soiMarketValue, acquisitionDate, assetType,
+                                 sectorId,          // our canonical GICS bucket
+                                 forceLiquid,       // user flipped "mark as liquid after TGE"
+                                 cgTokenId,         // optional: resolved CoinGecko coin id for live price
+                                 chain, address,    // optional: onchain identity
+                                 notes} ] }] }]
      commitments: [{id, clientId, managerId, soiId, committed, called}]
        // one client can commit to a manager/vintage. commitment data drives the
        // rollup: positions inside soi are scaled to the commitment's "called" value
@@ -224,17 +225,16 @@ const loadStore = () => {
     const parsed = JSON.parse(raw);
     // Basic shape validation
     if (!parsed.clients || !parsed.managers || !parsed.soIs || !parsed.commitments) return null;
-    // Rehydrate dates
-    for (const soi of parsed.soIs) {
-      if (soi.asOfDate && typeof soi.asOfDate === 'string') soi.asOfDate = soi.asOfDate;
-      for (const p of soi.positions || []) {
-        if (p.acquisitionDate && typeof p.acquisitionDate === 'string') {
-          // keep as ISO string; parse on demand
-        }
-      }
-    }
     // Migrate: ensure sectors array exists for pre-Stage-4 stores
     if (!Array.isArray(parsed.sectors) || parsed.sectors.length === 0) parsed.sectors = DEFAULT_SECTORS;
+    // Migrate: wrap legacy flat positions into snapshots array
+    for (const soi of parsed.soIs) {
+      if (!Array.isArray(soi.snapshots) || soi.snapshots.length === 0) {
+        soi.snapshots = [{ id: soi.id + '_snap', asOfDate: soi.asOfDate || '', notes: soi.notes || '', positions: soi.positions || [] }];
+        delete soi.positions;
+        delete soi.asOfDate;
+      }
+    }
     return { ...emptyStore(), ...parsed, settings: { ...emptyStore().settings, ...(parsed.settings || {}) } };
   } catch { return null; }
 };
@@ -332,7 +332,22 @@ const seedStore = () => {
     mkPos('USDC',              'USDC', 4000000, 1,    4_000_000,  'stablecoins',    '2024-01-01', { cgTokenId: 'usd-coin', forceLiquid: true }),
   ];
 
-  const sumMV = (positions) => positions.reduce((s,p)=>s+(p.soiMarketValue||0), 0);
+  // --- Helix Fund II older snapshot (~85% qty, ~75% MV) ---
+  const hack2PositionsOld = [
+    mkPos('Ethereum',  'ETH',  4080,  2900, 11_520_000,'infrastructure','2024-02-05',{cost:14_000_000,cgTokenId:'ethereum'}),
+    mkPos('Solana',    'SOL',  80750, 115,   9_619_000,'infrastructure','2024-01-20',{cost:8_500_000, cgTokenId:'solana'}),
+    mkPos('Hyperliquid','HYPE',153000,18,    3_240_000,'defi',          '2024-11-29',{cost:2_200_000, cgTokenId:'hyperliquid'}),
+    mkPos('EigenLayer','EIGEN',1020000,2.8,  2_880_000,'middleware',    '2024-05-12',{cost:3_000_000, cgTokenId:'eigenlayer'}),
+    mkPos('Bittensor', 'TAO',  7650,  380,   2_835_000,'applications',  '2024-03-11',{cost:1_800_000, cgTokenId:'bittensor'}),
+    mkPos('Fetch.ai',  'FET',  2125000,1.1,  2_438_000,'applications',  '2024-04-02',{cost:2_800_000, cgTokenId:'fetch-ai'}),
+    mkPos('Jupiter',   'JUP',  2975000,0.78, 2_415_000,'defi',          '2024-01-31',{cost:2_500_000, cgTokenId:'jupiter-exchange-solana'}),
+    mkPos('Ethena',    'ENA',  4675000,0.38, 1_856_000,'defi',          '2024-04-02',{cost:4_400_000, cgTokenId:'ethena'}),
+    mkPos('Celestia',  'TIA',  255000, 5.2,  1_305_000,'infrastructure','2024-01-15',{cost:2_700_000, cgTokenId:'celestia'}),
+    mkPos('Monad SAFT','',     0,      0,    1_875_000,'infrastructure','2024-04-01',{assetType:'SAFT',notes:'Locked; TGE est H2 2026'}),
+    mkPos('Grass SAFT','',     0,      0,      900_000,'middleware',    '2024-03-20',{assetType:'SAFT',notes:'Liquid since TGE',forceLiquid:true,ticker:'GRASS',cgTokenId:'grass-2'}),
+    mkPos('Story Protocol SAFT','',0,  0,    1_125_000,'applications',  '2024-08-10',{assetType:'SAFT'}),
+    mkPos('USDC',      'USDC', 3000000,1,    3_000_000,'stablecoins',   '2024-01-01',{cgTokenId:'usd-coin',forceLiquid:true}),
+  ];
 
   return {
     clients: [{ id: clientId, name: 'Sample Client Portfolio', notes: 'Seed demo client — illustrative only. All manager names, positions, and values are fictional.' }],
@@ -341,22 +356,40 @@ const seedStore = () => {
       { id: hackId, name: 'Helix Crypto Partners',    firm: 'Helix' },
     ],
     soIs: [
-      { id: fw3Id,   managerId: fwId,   vintage: 'Fund III', asOfDate: '2025-09-30', notes: '', positions: fw3Positions },
-      { id: fw4Id,   managerId: fwId,   vintage: 'Fund IV',  asOfDate: '2025-09-30', notes: '', positions: fw4Positions },
-      { id: hack1Id, managerId: hackId, vintage: 'Fund I',   asOfDate: '2025-09-30', notes: '', positions: hack1Positions },
-      { id: hack2Id, managerId: hackId, vintage: 'Fund II',  asOfDate: '2025-09-30', notes: '', positions: hack2Positions },
+      { id: fw3Id,   managerId: fwId,   vintage: 'Fund III', snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '', positions: fw3Positions }] },
+      { id: fw4Id,   managerId: fwId,   vintage: 'Fund IV',  snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '', positions: fw4Positions }] },
+      { id: hack1Id, managerId: hackId, vintage: 'Fund I',   snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '', positions: hack1Positions }] },
+      { id: hack2Id, managerId: hackId, vintage: 'Fund II',  snapshots: [
+        { id: uid(), asOfDate: '2025-06-30', notes: 'Q2 2025 statement', positions: hack2PositionsOld },
+        { id: uid(), asOfDate: '2025-09-30', notes: 'Q3 2025 statement', positions: hack2Positions  },
+      ]},
     ],
     commitments: [
-      { id: uid(), clientId, managerId: fwId,   soiId: fw3Id,   committed: 30_000_000, called: sumMV(fw3Positions), distributions: 8_500_000 },
-      { id: uid(), clientId, managerId: fwId,   soiId: fw4Id,   committed: 50_000_000, called: sumMV(fw4Positions), distributions: 2_000_000 },
-      { id: uid(), clientId, managerId: hackId, soiId: hack1Id, committed: 20_000_000, called: sumMV(hack1Positions), distributions: 5_000_000 },
-      { id: uid(), clientId, managerId: hackId, soiId: hack2Id, committed: 40_000_000, called: sumMV(hack2Positions), distributions: 0 },
+      { id: uid(), clientId, managerId: fwId,   soiId: fw3Id,   committed: 3_000_000, called: Math.round(3_000_000*0.7), distributions: 800_000 },
+      { id: uid(), clientId, managerId: fwId,   soiId: fw4Id,   committed: 5_000_000, called: Math.round(5_000_000*0.7), distributions: 200_000 },
+      { id: uid(), clientId, managerId: hackId, soiId: hack1Id, committed: 2_000_000, called: Math.round(2_000_000*0.7), distributions: 500_000 },
+      { id: uid(), clientId, managerId: hackId, soiId: hack2Id, committed: 8_000_000, called: Math.round(8_000_000*0.7), distributions: 0 },
     ],
     sectorOverrides: {},
     sectors: DEFAULT_SECTORS,
     settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null },
   };
 };
+
+/* =============================================================================
+   SNAPSHOT HELPERS
+   ============================================================================= */
+const snapshotsOf = (soi) => {
+  if (Array.isArray(soi.snapshots) && soi.snapshots.length) return soi.snapshots;
+  // legacy fallback
+  return [{ id: soi.id + '_snap', asOfDate: soi.asOfDate || '', notes: soi.notes || '', positions: soi.positions || [] }];
+};
+const latestSnapshot = (soi) => {
+  const snaps = snapshotsOf(soi);
+  return snaps.reduce((best, s) => (!best || (s.asOfDate || '') > (best.asOfDate || '')) ? s : best, null);
+};
+const sortedSnapshots = (soi) =>
+  [...snapshotsOf(soi)].sort((a, b) => (a.asOfDate || '') < (b.asOfDate || '') ? -1 : 1);
 
 /* =============================================================================
    ROLLUP ENGINE
@@ -397,7 +430,7 @@ const liquidityOverrideOf = (position) => {
   return 'auto';
 };
 
-const computeRollup = (store, selection, livePrices) => {
+const computeRollup = (store, selection, livePrices, scaleBy = null) => {
   const soIs = getSelectedSOIs(store, selection);
   const managerById = Object.fromEntries(store.managers.map(m => [m.id, m]));
 
@@ -405,7 +438,8 @@ const computeRollup = (store, selection, livePrices) => {
   const enriched = [];
   for (const soi of soIs) {
     const manager = managerById[soi.managerId];
-    for (const p of soi.positions) {
+    const scale = scaleBy ? (scaleBy(soi) ?? 1) : 1;
+    for (const p of (latestSnapshot(soi)?.positions || [])) {
       const sectorId = resolveSector(p, store.sectorOverrides);
       const liquid = isLiquid(p);
       const live = p.cgTokenId && livePrices[p.cgTokenId];
@@ -422,10 +456,12 @@ const computeRollup = (store, selection, livePrices) => {
         managerName: manager?.name || 'Unknown',
         vintage: soi.vintage,
         soiId: soi.id,
-        currentValue,
+        soiMarketValue: (p.soiMarketValue || 0) * scale,
+        currentValue: currentValue * scale,
         change24h,
         hasLivePrice: useLive,
         livePrice: useLive ? live.usd : null,
+        _scale: scale,
       });
     }
   }
@@ -506,7 +542,8 @@ const computeRollup = (store, selection, livePrices) => {
       soiId, managerId: soi.managerId, managerName: manager?.name, vintage: soi.vintage,
       value, pct: totalNAV > 0 ? (value/totalNAV)*100 : 0,
       positionCount: items.length,
-      asOfDate: soi.asOfDate,
+      asOfDate: latestSnapshot(soi)?.asOfDate,
+      _scale: items[0]?._scale ?? 1,
     };
   }).sort((a,b) => b.value - a.value);
 
@@ -585,8 +622,9 @@ const fetchHistory = async (tokenIds, days, apiKey, onProgress) => {
 
 /* Build a NAV time series for a set of positions given priceHistory.
    positions: [{quantity, soiMarketValue, acquisitionDate, cgTokenId, liquid}]
-   Returns [{date: ms, value: usd}] covering the requested range. */
-const buildNAVSeries = (positions, priceHistory, startMs, endMs) => {
+   Returns [{date: ms, value: usd}] covering the requested range.
+   Used for ManagersTab sparklines. */
+const buildNAVSeriesSimple = (positions, priceHistory, startMs, endMs) => {
   const dayMs = 86400000;
   const start = Math.floor(startMs / dayMs) * dayMs;
   const end = Math.floor(endMs / dayMs) * dayMs;
@@ -629,6 +667,87 @@ const buildNAVSeries = (positions, priceHistory, startMs, endMs) => {
     series.push({ date: d, value: total });
   }
   return series;
+};
+
+/* Build a NAV time series for soiBundles (SOIs with snapshots).
+   Supports multiple snapshots per SOI — uses the latest snapshot active at each day.
+   Returns { series, earliestSnapshotMs, latestSnapshotMs, snapshotDates }. */
+const buildNAVSeries = (soiBundles, priceHistory, startMs, endMs, scaleFn = null) => {
+  const dayMs = 86400000;
+  const start = Math.floor(startMs / dayMs) * dayMs;
+  const end   = Math.floor(endMs   / dayMs) * dayMs;
+
+  // Collect snapshot boundary dates
+  let earliestSnapshotMs = Infinity, latestSnapshotMs = -Infinity;
+  const snapshotDateSet = new Set();
+  for (const bundle of soiBundles) {
+    for (const snap of snapshotsOf(bundle)) {
+      if (!snap.asOfDate) continue;
+      const ms = new Date(snap.asOfDate + 'T00:00:00Z').getTime();
+      if (isNaN(ms)) continue;
+      if (ms < earliestSnapshotMs) earliestSnapshotMs = ms;
+      if (ms > latestSnapshotMs)   latestSnapshotMs   = ms;
+      snapshotDateSet.add(ms);
+    }
+  }
+  if (earliestSnapshotMs === Infinity)  earliestSnapshotMs = null;
+  if (latestSnapshotMs   === -Infinity) latestSnapshotMs   = null;
+
+  // Pre-fill price history for all tokens used in any snapshot
+  const filledByToken = {};
+  for (const bundle of soiBundles) {
+    for (const snap of snapshotsOf(bundle)) {
+      for (const p of (snap.positions || [])) {
+        if (!p.cgTokenId || !isLiquid(p) || filledByToken[p.cgTokenId]) continue;
+        const byDay = priceHistory[p.cgTokenId];
+        if (!byDay) continue;
+        const filled = {}; let last = null;
+        for (let d = start; d <= end; d += dayMs) {
+          if (byDay[d] !== undefined) last = byDay[d];
+          filled[d] = last;
+        }
+        filledByToken[p.cgTokenId] = filled;
+      }
+    }
+  }
+
+  const series = [];
+  for (let d = start; d <= end; d += dayMs) {
+    const dStr = new Date(d).toISOString().slice(0, 10);
+    let total = 0;
+    for (const bundle of soiBundles) {
+      const scale = scaleFn ? (scaleFn(bundle) ?? 1) : 1;
+      const snaps = sortedSnapshots(bundle);
+      if (!snaps.length) continue;
+      // pick latest snapshot whose asOfDate <= dStr
+      let bestSnap = snaps[0];
+      for (const snap of snaps) {
+        if ((snap.asOfDate || '') <= dStr) bestSnap = snap;
+        else break;
+      }
+      let bundleTotal = 0;
+      for (const p of (bestSnap.positions || [])) {
+        const acqMs  = p.acquisitionDate ? new Date(p.acquisitionDate).getTime() : null;
+        const acqDay = acqMs ? Math.floor(acqMs / dayMs) * dayMs : null;
+        if (acqDay && d < acqDay) continue;
+        if (isLiquid(p) && p.cgTokenId && p.quantity) {
+          const price = filledByToken[p.cgTokenId]?.[d];
+          bundleTotal += price != null ? p.quantity * price : p.soiMarketValue;
+        } else {
+          bundleTotal += p.soiMarketValue || 0;
+        }
+      }
+      total += bundleTotal * scale;
+    }
+    series.push({ date: d, value: total });
+  }
+
+  return {
+    series,
+    earliestSnapshotMs,
+    latestSnapshotMs,
+    snapshotDates: [...snapshotDateSet].sort((a, b) => a - b),
+  };
 };
 
 const rangeToStartMs = (rangeId, positions) => {
@@ -785,7 +904,7 @@ export default function SOIDashboard() {
   // Collect all coingecko ids across store for refresh
   const allCgIds = useMemo(() => {
     const ids = new Set();
-    for (const soi of store.soIs) for (const p of soi.positions) if (p.cgTokenId) ids.add(p.cgTokenId);
+    for (const soi of store.soIs) for (const p of (latestSnapshot(soi)?.positions || [])) if (p.cgTokenId) ids.add(p.cgTokenId);
     return [...ids];
   }, [store.soIs]);
 
@@ -809,14 +928,15 @@ export default function SOIDashboard() {
       setPriceError('Add a CoinGecko Demo API key in Settings to load historical charts.');
       return;
     }
+    const cappedDays = Math.min(daysNeeded, 365);  // CoinGecko Demo limit
     const ids = _.uniq(tokenIds).filter(Boolean);
-    const missing = ids.filter(id => (historyFetched[id] || 0) < daysNeeded);
+    const missing = ids.filter(id => (historyFetched[id] || 0) < cappedDays);
     if (!missing.length) return;
 
     setHistoryLoading(true); setPriceError(null);
     setHistoryProgress({ current: 0, total: missing.length, token: '' });
     const { history, error } = await fetchHistory(
-      missing, daysNeeded, store.settings.cgApiKey,
+      missing, cappedDays, store.settings.cgApiKey,
       (current, total, token) => setHistoryProgress({ current, total, token })
     );
     if (error) setPriceError(error);
@@ -829,7 +949,7 @@ export default function SOIDashboard() {
     });
     setHistoryFetched(prev => {
       const next = { ...prev };
-      for (const id of missing) next[id] = Math.max(next[id] || 0, daysNeeded);
+      for (const id of missing) next[id] = Math.max(next[id] || 0, cappedDays);
       return next;
     });
     setHistoryLoading(false);
@@ -837,7 +957,7 @@ export default function SOIDashboard() {
   }, [store.settings.cgApiKey, historyFetched]);
 
   // Rollup for current selection
-  const rollup = useMemo(() => computeRollup(store, selection, livePrices), [store, selection, livePrices]);
+  const rollup = useMemo(() => computeRollup(store, selection, livePrices, null), [store, selection, livePrices]);
 
   // Selection label
   const selectionLabel = useMemo(() => {
@@ -1125,7 +1245,8 @@ function MenuItem({ active, onClick, children, icon, indent }) {
 /* =============================================================================
    PERFORMANCE CHART — Yahoo Finance-adjacent area chart
    Props:
-     positions: enriched positions to include in the NAV series
+     soiBundles: array of SOI objects (each with snapshots)
+     scaleFn: optional (bundle) => scale factor
      priceHistory: { cgTokenId → { utcDayMs → price } }
      historyLoading: bool
      historyProgress: { current, total, token }
@@ -1134,26 +1255,31 @@ function MenuItem({ active, onClick, children, icon, indent }) {
      apiKey: for gating UI
      height, compact: style controls
    ============================================================================= */
-function PerformanceChart({ positions, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, height=260, compact=false, title, asOfDate, asOfDates }) {
-  // Determine the days window needed for the current range
-  const tokenIds = useMemo(() => _.uniq(positions.filter(p => p.liquid && p.cgTokenId).map(p => p.cgTokenId)), [positions]);
-  const daysNeeded = useMemo(() => rangeToDays(range, positions), [range, positions]);
+function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, height=260, compact=false, title }) {
+  const tokenIds = useMemo(() => {
+    const ids = new Set();
+    for (const b of soiBundles) for (const snap of snapshotsOf(b)) for (const p of (snap.positions||[])) if (isLiquid(p)&&p.cgTokenId) ids.add(p.cgTokenId);
+    return [...ids];
+  }, [soiBundles]);
+
+  const allPositions = useMemo(() => soiBundles.flatMap(b => snapshotsOf(b).flatMap(s => s.positions||[])), [soiBundles]);
+  const daysNeeded = useMemo(() => Math.min(rangeToDays(range, allPositions), 365), [range, allPositions]);
 
   // Trigger fetch if we're missing data
-  const [hasTriggered, setHasTriggered] = useState(false);
   useEffect(() => {
     if (!apiKey || !tokenIds.length) return;
     onRequestFetch?.(tokenIds, daysNeeded);
-    setHasTriggered(true);
   }, [tokenIds.join(','), daysNeeded, apiKey]);
 
   // Build series
-  const series = useMemo(() => {
-    if (!positions.length) return [];
-    const startMs = rangeToStartMs(range, positions);
-    const endMs = Date.now();
-    return buildNAVSeries(positions, priceHistory, startMs, endMs);
-  }, [positions, priceHistory, range]);
+  const { series, earliestSnapshotMs, latestSnapshotMs, snapshotDates } = useMemo(() => {
+    if (!soiBundles.length) return { series:[], earliestSnapshotMs:null, latestSnapshotMs:null, snapshotDates:[] };
+    const startMs = rangeToStartMs(range, allPositions);
+    return buildNAVSeries(soiBundles, priceHistory, startMs, Date.now(), scaleFn);
+  }, [soiBundles, priceHistory, range, allPositions, scaleFn]);
+
+  // Derive asOfMs from latestSnapshotMs for badge display
+  const asOfMs = latestSnapshotMs;
 
   const startValue = series[0]?.value ?? 0;
   const endValue = series[series.length - 1]?.value ?? 0;
@@ -1176,22 +1302,6 @@ function PerformanceChart({ positions, priceHistory, historyLoading, historyProg
     const min = Math.min(...vals), max = Math.max(...vals);
     return max + (max - min) * 0.1;
   }, [series]);
-
-  // As-of marker computation
-  const asOfMs = useMemo(() => {
-    if (asOfDate) return new Date(asOfDate).getTime();
-    if (asOfDates && asOfDates.length) {
-      // For rolled-up views: the latest as-of date is the honest "everything is stale after this" marker
-      const times = asOfDates.filter(Boolean).map(d => new Date(d).getTime()).filter(n => !isNaN(n));
-      return times.length ? Math.max(...times) : null;
-    }
-    return null;
-  }, [asOfDate, asOfDates]);
-
-  const hasAsOfInRange = useMemo(() => {
-    if (!asOfMs || !series.length) return false;
-    return asOfMs >= series[0].date && asOfMs <= series[series.length - 1].date;
-  }, [asOfMs, series]);
 
   return (
     <Panel className={compact ? 'p-3' : 'p-5'}>
@@ -1219,6 +1329,13 @@ function PerformanceChart({ positions, priceHistory, historyLoading, historyProg
               ))}
             </div>
           )}
+        </div>
+      )}
+      {!compact && snapshotDates && snapshotDates.length > 1 && (
+        <div className="flex items-center gap-4 mb-2" style={{fontSize:10, color:TEXT_MUTE}}>
+          <span>◼ <span style={{color:TEXT_DIM}}>Realized</span> (between snapshots)</span>
+          <span>◻ Simulated (before / after holdings date)</span>
+          <span style={{color:GOLD}}>━━</span><span>Snapshot date</span>
         </div>
       )}
 
@@ -1276,14 +1393,25 @@ function PerformanceChart({ positions, priceHistory, historyLoading, historyProg
                 formatter={(v) => [fmtCurrency(v), 'NAV']} />
               <Area type="monotone" dataKey="value" stroke={lineColor} strokeWidth={1.5}
                 fill={`url(#grad-${positive?'up':'down'})`} />
-              {hasAsOfInRange && (
-                <>
-                  <ReferenceArea x1={asOfMs} x2={series[series.length - 1].date}
-                    fill={GOLD} fillOpacity={0.06} stroke="none" />
-                  <ReferenceLine x={asOfMs} stroke={GOLD} strokeWidth={1} strokeDasharray="3 3"
-                    label={{ value: 'As of', position: 'top', fill: GOLD, fontSize: 10 }} />
-                </>
+              {/* Backward-simulated (before earliest snapshot) */}
+              {earliestSnapshotMs && series.length > 0 && earliestSnapshotMs > series[0].date && (
+                <ReferenceArea
+                  x1={series[0].date}
+                  x2={Math.min(earliestSnapshotMs, series[series.length-1].date)}
+                  fill={TEXT_MUTE} fillOpacity={0.12} stroke="none" />
               )}
+              {/* Forward-simulated (after latest snapshot) */}
+              {latestSnapshotMs && series.length > 0 && latestSnapshotMs < series[series.length-1].date && (
+                <ReferenceArea
+                  x1={Math.max(latestSnapshotMs, series[0].date)}
+                  x2={series[series.length-1].date}
+                  fill={GOLD} fillOpacity={0.08} stroke="none" />
+              )}
+              {/* Snapshot date markers */}
+              {(snapshotDates||[]).filter(ms => series.length > 0 && ms >= series[0].date && ms <= series[series.length-1].date).map((ms,i) => (
+                <ReferenceLine key={i} x={ms} stroke={GOLD} strokeWidth={1} strokeDasharray="3 3"
+                  label={{ value: new Date(ms).toLocaleDateString([],{month:'short',year:'2-digit'}), position:'top', fill:GOLD, fontSize:9 }} />
+              ))}
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -1338,7 +1466,7 @@ function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, h
     <div className="space-y-6">
       {/* PERFORMANCE CHART */}
       <PerformanceChart
-        positions={rollup.positions}
+        soiBundles={rollup.soIs}
         priceHistory={priceHistory}
         historyLoading={historyLoading}
         historyProgress={historyProgress}
@@ -1348,7 +1476,6 @@ function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, h
         apiKey={apiKey}
         title="Portfolio performance"
         height={280}
-        asOfDates={rollup.soIs.map(s => s.asOfDate)}
       />
 
       {/* KPI ROW */}
@@ -1502,7 +1629,7 @@ function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey }) {
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       {rollup.managerBreakdown.map(m => {
         const soi = store.soIs.find(s => s.id === m.soiId);
-        const positions = (soi?.positions || []).map(p => {
+        const positions = (latestSnapshot(soi)?.positions || []).map(p => {
           const sectorId = resolveSector(p, store.sectorOverrides);
           const liquid = isLiquid(p);
           return { ...p, sectorId, liquid };
@@ -1510,7 +1637,7 @@ function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey }) {
         // Per-SOI sparkline
         const startMs = rangeToStartMs(range, positions);
         const series = apiKey && Object.keys(priceHistory).length > 0
-          ? buildNAVSeries(positions, priceHistory, startMs, Date.now())
+          ? buildNAVSeriesSimple(positions, priceHistory, startMs, Date.now())
           : [];
         const startVal = series[0]?.value ?? 0;
         const endVal = series[series.length-1]?.value ?? 0;
@@ -1611,11 +1738,14 @@ function PositionsTab({ rollup, store, updateStore }) {
       ...s,
       soIs: s.soIs.map(soi => ({
         ...soi,
-        positions: soi.positions.map(p => {
-          const key = (p.ticker && p.ticker.toUpperCase()) || p.positionName;
-          if (key !== tokenKey) return p;
-          return { ...p, forceLiquid: newValue };
-        }),
+        snapshots: snapshotsOf(soi).map(snap => ({
+          ...snap,
+          positions: snap.positions.map(p => {
+            const key = (p.ticker&&p.ticker.toUpperCase())||p.positionName;
+            if (key !== tokenKey) return p;
+            return { ...p, forceLiquid: newValue };
+          }),
+        })),
       })),
     }));
   };
@@ -1630,11 +1760,14 @@ function PositionsTab({ rollup, store, updateStore }) {
         sectorOverrides: newOverrides,
         soIs: s.soIs.map(soi => ({
           ...soi,
-          positions: soi.positions.map(p => {
-            const key = (p.ticker && p.ticker.toUpperCase()) || p.positionName;
-            if (key !== tokenKey) return p;
-            return { ...p, sectorId };
-          }),
+          snapshots: snapshotsOf(soi).map(snap => ({
+            ...snap,
+            positions: snap.positions.map(p => {
+              const key = (p.ticker&&p.ticker.toUpperCase())||p.positionName;
+              if (key !== tokenKey) return p;
+              return { ...p, sectorId };
+            }),
+          })),
         })),
       };
     });
@@ -1741,11 +1874,18 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
   const manager = store.managers.find(m => m.id === soi?.managerId);
   const [editingPosition, setEditingPosition] = useState(null); // {mode: 'add'|'edit', position?}
   const [updatingSOI, setUpdatingSOI] = useState(false);
+
+  const snaps = soi ? sortedSnapshots(soi) : [];
+  const [selectedSnapId, setSelectedSnapId] = useState(() => latestSnapshot(soi)?.id ?? null);
+  useEffect(() => { setSelectedSnapId(latestSnapshot(soi)?.id ?? null); }, [soiId]);
+
   if (!soi) return null;
+
+  const selectedSnap = snaps.find(s => s.id === selectedSnapId) || latestSnapshot(soi) || snaps[0];
 
   // Build enriched positions for this one SOI
   const rows = useMemo(() => {
-    return soi.positions.map(p => {
+    return (selectedSnap?.positions || []).map(p => {
       const sectorId = resolveSector(p, store.sectorOverrides);
       const liquid = isLiquid(p);
       const live = p.cgTokenId && livePrices[p.cgTokenId];
@@ -1758,7 +1898,7 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
         hasLivePrice: useLive,
       };
     });
-  }, [soi, store.sectorOverrides, livePrices]);
+  }, [selectedSnap, store.sectorOverrides, livePrices]);
 
   const totalNAV = _.sumBy(rows, 'currentValue');
   const soiNAV = _.sumBy(rows, 'soiMarketValue');
@@ -1772,24 +1912,42 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
     return { id: s.id, label: s.label, color: s.color, value: v, pct: totalNAV>0?(v/totalNAV)*100:0, count: items.length };
   }).filter(s => s.value > 0);
 
+  const deleteSnapshot = (snapId) => {
+    if (snaps.length <= 1) { alert('Cannot delete the only snapshot.'); return; }
+    if (!confirm('Delete this snapshot? This cannot be undone.')) return;
+    updateStore(s => ({
+      ...s,
+      soIs: s.soIs.map(x => x.id !== soiId ? x : {
+        ...x,
+        snapshots: snapshotsOf(x).filter(snap => snap.id !== snapId),
+      }),
+    }));
+    const remaining = snaps.filter(s => s.id !== snapId);
+    setSelectedSnapId(remaining[remaining.length - 1]?.id ?? null);
+  };
+
   const cycleLiquidity = (posId) => {
     // auto → liquid → illiquid → auto
     const cur = rows.find(r => r.id === posId);
     const curOverride = liquidityOverrideOf(cur);
     const next = curOverride === 'auto' ? (cur.liquid ? 'illiquid' : 'liquid')
-               : curOverride === 'liquid' ? 'illiquid'
-               : curOverride === 'illiquid' ? 'auto' : 'auto';
+               : curOverride === 'liquid' ? 'illiquid' : 'auto';
     updateStore(s => ({
       ...s,
-      soIs: s.soIs.map(x => x.id !== soiId ? x : ({
+      soIs: s.soIs.map(x => x.id !== soiId ? x : {
         ...x,
-        positions: x.positions.map(p => {
-          if (p.id !== posId) return p;
-          const copy = { ...p, liquidityOverride: next };
-          delete copy.forceLiquid; // migrate off legacy field
-          return copy;
-        }),
-      })),
+        snapshots: snapshotsOf(x).map(snap =>
+          snap.id !== selectedSnapId ? snap : {
+            ...snap,
+            positions: snap.positions.map(p => {
+              if (p.id !== posId) return p;
+              const copy = { ...p, liquidityOverride: next };
+              delete copy.forceLiquid;
+              return copy;
+            }),
+          }
+        ),
+      }),
     }));
   };
 
@@ -1798,10 +1956,16 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
       ...s,
       soIs: s.soIs.map(x => {
         if (x.id !== soiId) return x;
-        if (payload.id && x.positions.find(p => p.id === payload.id)) {
-          return { ...x, positions: x.positions.map(p => p.id === payload.id ? { ...p, ...payload } : p) };
-        }
-        return { ...x, positions: [...x.positions, { ...payload, id: payload.id || uid() }] };
+        return {
+          ...x,
+          snapshots: snapshotsOf(x).map(snap => {
+            if (snap.id !== selectedSnapId) return snap;
+            if (payload.id && snap.positions.find(p => p.id === payload.id)) {
+              return { ...snap, positions: snap.positions.map(p => p.id === payload.id ? { ...p, ...payload } : p) };
+            }
+            return { ...snap, positions: [...snap.positions, { ...payload, id: payload.id || uid() }] };
+          }),
+        };
       }),
     }));
     setEditingPosition(null);
@@ -1811,12 +1975,14 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
     if (!confirm('Delete this position?')) return;
     updateStore(s => ({
       ...s,
-      soIs: s.soIs.map(x => x.id !== soiId ? x : ({ ...x, positions: x.positions.filter(p => p.id !== posId) })),
+      soIs: s.soIs.map(x => x.id !== soiId ? x : {
+        ...x,
+        snapshots: snapshotsOf(x).map(snap =>
+          snap.id !== selectedSnapId ? snap : { ...snap, positions: snap.positions.filter(p => p.id !== posId) }
+        ),
+      }),
     }));
   };
-
-  // Positions for chart (need liquid flag computed same way as rows)
-  const chartPositions = rows;
 
   return (
     <div className="space-y-4">
@@ -1828,9 +1994,30 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
           <div className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Manager SOI</div>
           <h2 className="text-xl font-semibold mt-0.5">{manager?.name} — {soi.vintage}</h2>
           <div className="text-xs mt-1 flex items-center gap-2" style={{color:TEXT_DIM}}>
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{color:GOLD, backgroundColor:GOLD+'11', border:`1px solid ${GOLD}44`}}>
-              As of {soi.asOfDate || '—'}
-            </span>
+            {snaps.length >= 2 ? (
+              <div className="flex items-center gap-2">
+                <select value={selectedSnapId || ''} onChange={e => setSelectedSnapId(e.target.value)}
+                  className="text-xs px-2 py-1 rounded outline-none"
+                  style={{color:GOLD, backgroundColor:GOLD+'11', border:`1px solid ${GOLD}44`}}>
+                  {[...snaps].reverse().map(snap => (
+                    <option key={snap.id} value={snap.id}>
+                      As of {snap.asOfDate || '—'}{snap.notes ? ` (${snap.notes})` : ''}
+                    </option>
+                  ))}
+                </select>
+                {snaps.length > 1 && (
+                  <button onClick={() => deleteSnapshot(selectedSnapId)}
+                    className="text-xs px-2 py-1 rounded flex items-center gap-1"
+                    style={{color:RED, border:`1px solid ${RED}44`}}>
+                    <Trash2 size={10}/> Delete snapshot
+                  </button>
+                )}
+              </div>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{color:GOLD, backgroundColor:GOLD+'11', border:`1px solid ${GOLD}44`}}>
+                As of {selectedSnap?.asOfDate || '—'}
+              </span>
+            )}
             <span>{rows.length} positions</span>
           </div>
         </div>
@@ -1847,7 +2034,7 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
 
       {/* Performance chart */}
       <PerformanceChart
-        positions={chartPositions}
+        soiBundles={[soi]}
         priceHistory={priceHistory}
         historyLoading={historyLoading}
         historyProgress={historyProgress}
@@ -1857,7 +2044,6 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
         apiKey={apiKey}
         title={`${manager?.name} ${soi.vintage} performance`}
         height={240}
-        asOfDate={soi.asOfDate}
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -2260,9 +2446,9 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Update behavior: 'new' (default) or 'replace' (overwrite existing SOI)
+  // Update behavior: 'new' | 'add_snapshot' | 'replace_latest'
   // Only relevant when user selects a manager that already has SOIs
-  const [updateBehavior, setUpdateBehavior] = useState(isReplaceMode ? 'replace' : 'new');
+  const [updateBehavior, setUpdateBehavior] = useState(isReplaceMode ? 'replace_latest' : 'new');
   const [replaceTargetSoiId, setReplaceTargetSoiId] = useState(isReplaceMode ? prefillTarget.soiId : '');
 
   // Assignment fields
@@ -2392,25 +2578,35 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
 
     if (!positions.length) { setError('No valid positions to save.'); return; }
 
-    // REPLACE PATH — overwrite positions on an existing SOI
-    if (updateBehavior === 'replace' && replaceTargetSoiId) {
-      const prior = store.soIs.find(s => s.id === replaceTargetSoiId);
-      if (!prior) { setError('Target SOI not found.'); return; }
-      const nextStore = {
-        ...store,
-        soIs: store.soIs.map(s => s.id !== replaceTargetSoiId ? s : ({
-          ...s,
-          asOfDate: asOfDate || today(),
-          positions,
-        })),
-        // Update the called amount on the matching commitment to reflect new MV total
-        commitments: store.commitments.map(c => c.soiId !== replaceTargetSoiId ? c : ({
+    // ADD SNAPSHOT PATH — add a new snapshot to existing SOI
+    if (updateBehavior === 'add_snapshot' && replaceTargetSoiId) {
+      const newSnap = { id: uid(), asOfDate: asOfDate || today(), notes: '', positions };
+      updateStore(s => ({
+        ...s,
+        soIs: s.soIs.map(x => x.id !== replaceTargetSoiId ? x : {
+          ...x, snapshots: [...snapshotsOf(x), newSnap],
+        }),
+      }));
+      onDone(); return;
+    }
+
+    // REPLACE LATEST PATH — overwrite most recent snapshot
+    if (updateBehavior === 'replace_latest' && replaceTargetSoiId) {
+      const targetSoi = store.soIs.find(s => s.id === replaceTargetSoiId);
+      const latestSnapId = latestSnapshot(targetSoi)?.id;
+      updateStore(s => ({
+        ...s,
+        soIs: s.soIs.map(x => x.id !== replaceTargetSoiId ? x : {
+          ...x,
+          snapshots: snapshotsOf(x).map(snap => snap.id !== latestSnapId ? snap : {
+            ...snap, asOfDate: asOfDate || today(), positions,
+          }),
+        }),
+        commitments: s.commitments.map(c => c.soiId !== replaceTargetSoiId ? c : ({
           ...c, called: _.sumBy(positions, 'soiMarketValue'),
         })),
-      };
-      updateStore(nextStore);
-      onDone();
-      return;
+      }));
+      onDone(); return;
     }
 
     // NEW PATH — create a new SOI + commitment
@@ -2430,7 +2626,7 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
     const soiId = uid();
     const soi = {
       id: soiId, managerId, vintage: vintage || 'Main Fund',
-      asOfDate: asOfDate || today(), notes: '', positions,
+      snapshots: [{ id: uid(), asOfDate: asOfDate || today(), notes: '', positions }],
     };
     const commitment = {
       id: uid(), clientId, managerId, soiId,
@@ -2531,28 +2727,35 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
                   <label className="flex items-start gap-2 text-xs cursor-pointer">
                     <input type="radio" checked={updateBehavior==='new'} onChange={()=>setUpdateBehavior('new')} />
                     <span>
-                      <strong style={{color:TEXT}}>Create new vintage</strong>
-                      <span className="ml-1" style={{color:TEXT_DIM}}>— this is a different fund (e.g., Fund III vs Fund IV).</span>
+                      <strong style={{color:TEXT}}>Create new fund/vintage</strong>
+                      <span className="ml-1" style={{color:TEXT_DIM}}>— different fund (e.g., Fund V).</span>
                     </span>
                   </label>
                   <label className="flex items-start gap-2 text-xs cursor-pointer">
-                    <input type="radio" checked={updateBehavior==='replace'} onChange={()=>setUpdateBehavior('replace')} />
+                    <input type="radio" checked={updateBehavior==='add_snapshot'} onChange={()=>setUpdateBehavior('add_snapshot')} />
                     <span>
-                      <strong style={{color:TEXT}}>Update existing vintage</strong>
-                      <span className="ml-1" style={{color:TEXT_DIM}}>— this is a newer quarter for a fund already in the store. Overwrites holdings.</span>
+                      <strong style={{color:TEXT}}>Add as new snapshot</strong>
+                      <span className="ml-1" style={{color:TEXT_DIM}}>— newer quarter for an existing fund. Keeps history.</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-xs cursor-pointer">
+                    <input type="radio" checked={updateBehavior==='replace_latest'} onChange={()=>setUpdateBehavior('replace_latest')} />
+                    <span>
+                      <strong style={{color:TEXT}}>Replace latest snapshot</strong>
+                      <span className="ml-1" style={{color:TEXT_DIM}}>— overwrite the most recent holdings.</span>
                     </span>
                   </label>
                 </div>
-                {updateBehavior === 'replace' && (
+                {(updateBehavior === 'add_snapshot' || updateBehavior === 'replace_latest') && (
                   <div className="mt-3">
-                    <label className="text-[10px] uppercase tracking-wider" style={{color:TEXT_MUTE}}>Which vintage to update?</label>
+                    <label className="text-[10px] uppercase tracking-wider" style={{color:TEXT_MUTE}}>Which vintage to target?</label>
                     <select value={replaceTargetSoiId} onChange={e=>setReplaceTargetSoiId(e.target.value)}
                       className="w-full mt-1 px-3 py-2 rounded text-sm outline-none"
                       style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
                       <option value="">— select —</option>
                       {existingSois.map(s => (
                         <option key={s.id} value={s.id}>
-                          {s.vintage} — as of {s.asOfDate || 'no date'} ({s.positions.length} positions)
+                          {s.vintage} — {snapshotsOf(s).length} snapshot(s), latest {latestSnapshot(s)?.asOfDate || 'no date'}
                         </option>
                       ))}
                     </select>
@@ -2569,8 +2772,8 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
                 <RefreshCw size={12} /> Updating holdings
               </div>
               <div className="text-xs mt-1" style={{color:TEXT_DIM}}>
-                Replacing <strong style={{color:TEXT}}>{prefilledManager?.name} {prefilledSoi.vintage}</strong>'s positions
-                (currently {prefilledSoi.positions.length} positions, as of {prefilledSoi.asOfDate || '—'}).
+                Replacing <strong style={{color:TEXT}}>{prefilledManager?.name} {prefilledSoi.vintage}</strong>'s latest snapshot
+                (as of {latestSnapshot(prefilledSoi)?.asOfDate || '—'}).
                 Set the new as-of date below.
               </div>
             </div>
@@ -2578,7 +2781,7 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* Hide client/manager/vintage/commitment fields in replace mode — they're fixed */}
-            {updateBehavior !== 'replace' && (
+            {updateBehavior !== 'replace_latest' && updateBehavior !== 'add_snapshot' && (
               <>
             <div>
               <label className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>Client</label>
@@ -2692,11 +2895,11 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
               disabled={
                 (mode==='upload' && !parsedPositions.length) ||
                 (mode==='manual' && !manualPositions.some(p=>p.positionName && p.soiMarketValue)) ||
-                (updateBehavior === 'replace' && !replaceTargetSoiId)
+                ((updateBehavior === 'replace_latest' || updateBehavior === 'add_snapshot') && !replaceTargetSoiId)
               }
               className="text-xs px-4 py-1.5 rounded font-medium flex items-center gap-1"
-              style={{backgroundColor: updateBehavior === 'replace' ? GOLD : ACCENT, color: BG}}>
-              <Check size={12} /> {updateBehavior === 'replace' ? 'Replace holdings' : 'Save to store'}
+              style={{backgroundColor: updateBehavior === 'replace_latest' ? GOLD : ACCENT, color: BG}}>
+              <Check size={12} /> {updateBehavior === 'replace_latest' ? 'Replace holdings' : updateBehavior === 'add_snapshot' ? 'Add snapshot' : 'Save to store'}
             </button>
           </div>
         </div>
@@ -2815,7 +3018,7 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
       const mgr = store.managers.find(x => x.id === c.managerId);
       const soi = store.soIs.find(x => x.id === c.soiId);
       // TODO: live-price-aware NAV; for now use SOI marked values (consistent with persisted store)
-      const nav = _.sumBy(soi?.positions || [], p => p.soiMarketValue || 0);
+      const nav = _.sumBy(latestSnapshot(soi)?.positions || [], p => p.soiMarketValue || 0);
       const committed = c.committed || 0;
       const called = c.called || 0;
       const distributions = c.distributions || 0;
@@ -3019,12 +3222,13 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
               {store.soIs.map(x => {
                 const mgr = managerById[x.managerId];
                 const commitCount = store.commitments.filter(c => c.soiId === x.id).length;
-                const posCount = x.positions?.length || 0;
+                const posCount = latestSnapshot(x)?.positions?.length || 0;
+                const snapCount = snapshotsOf(x).length;
                 return (
                   <ManageRow
                     key={x.id}
                     title={`${mgr?.name || 'Unknown manager'} — ${x.vintage || '(no vintage)'}`}
-                    subtitle={`${posCount} position${posCount===1?'':'s'} · as of ${x.asOfDate || '—'} · ${commitCount} commitment${commitCount===1?'':'s'}`}
+                    subtitle={`${snapCount} snapshot${snapCount===1?'':'s'} · ${posCount} positions (latest) · as of ${latestSnapshot(x)?.asOfDate || '—'} · ${commitCount} commitment${commitCount===1?'':'s'}`}
                     editFields={[{ label: 'Vintage label', value: x.vintage || '', placeholder: 'e.g. Fund III' }]}
                     onSave={([vintage]) => renameSOI(x.id, vintage)}
                     onDelete={() => deleteSOI(x.id)}
@@ -3124,7 +3328,11 @@ function SectorRow({ sector, store, updateStore }) {
 
   const useCount = useMemo(() => {
     let n = 0;
-    for (const soi of store.soIs) for (const p of (soi.positions || [])) if (p.sectorId === sector.id) n++;
+    for (const soi of store.soIs) {
+      for (const snap of snapshotsOf(soi)) {
+        for (const p of (snap.positions || [])) if (p.sectorId === sector.id) n++;
+      }
+    }
     for (const id of Object.values(store.sectorOverrides || {})) if (id === sector.id) n++;
     return n;
   }, [store, sector.id]);
@@ -3142,7 +3350,10 @@ function SectorRow({ sector, store, updateStore }) {
       const repl = replacementId || null;
       const nextSoIs = s.soIs.map(soi => ({
         ...soi,
-        positions: (soi.positions || []).map(p => p.sectorId === sector.id ? { ...p, sectorId: repl } : p),
+        snapshots: snapshotsOf(soi).map(snap => ({
+          ...snap,
+          positions: (snap.positions || []).map(p => p.sectorId === sector.id ? { ...p, sectorId: repl } : p),
+        })),
       }));
       const nextOverrides = { ...(s.sectorOverrides || {}) };
       for (const [k, id] of Object.entries(nextOverrides)) {
