@@ -180,6 +180,7 @@ const fmtPctSigned = (v, d=2) => {
   const sign = v > 0 ? '+' : '';
   return `${sign}${v.toFixed(d)}%`;
 };
+const fmtMoic = (v) => (v === null || v === undefined || isNaN(v) || !isFinite(v)) ? '—' : `${v.toFixed(2)}×`;
 const uid = () => Math.random().toString(36).slice(2, 10);
 const today = () => new Date().toISOString().slice(0,10);
 
@@ -341,10 +342,10 @@ const seedStore = () => {
       { id: hack2Id, managerId: hackId, vintage: 'Fund II',  asOfDate: '2025-09-30', notes: '', positions: hack2Positions },
     ],
     commitments: [
-      { id: uid(), clientId, managerId: fwId,   soiId: fw3Id,   committed: 30_000_000, called: sumMV(fw3Positions) },
-      { id: uid(), clientId, managerId: fwId,   soiId: fw4Id,   committed: 50_000_000, called: sumMV(fw4Positions) },
-      { id: uid(), clientId, managerId: hackId, soiId: hack1Id, committed: 20_000_000, called: sumMV(hack1Positions) },
-      { id: uid(), clientId, managerId: hackId, soiId: hack2Id, committed: 40_000_000, called: sumMV(hack2Positions) },
+      { id: uid(), clientId, managerId: fwId,   soiId: fw3Id,   committed: 30_000_000, called: sumMV(fw3Positions), distributions: 8_500_000 },
+      { id: uid(), clientId, managerId: fwId,   soiId: fw4Id,   committed: 50_000_000, called: sumMV(fw4Positions), distributions: 2_000_000 },
+      { id: uid(), clientId, managerId: hackId, soiId: hack1Id, committed: 20_000_000, called: sumMV(hack1Positions), distributions: 5_000_000 },
+      { id: uid(), clientId, managerId: hackId, soiId: hack2Id, committed: 40_000_000, called: sumMV(hack2Positions), distributions: 0 },
     ],
     sectorOverrides: {},
     settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null },
@@ -946,7 +947,7 @@ export default function SOIDashboard() {
         )}
 
         {rollup.positionCount > 0 && tab === 'overview' && (
-          <OverviewTab rollup={rollup}
+          <OverviewTab rollup={rollup} store={store} selection={selection}
             priceHistory={priceHistory} historyLoading={historyLoading} historyProgress={historyProgress}
             range={range} onRangeChange={setRange} onRequestFetch={fetchHistoryFor}
             apiKey={store.settings.cgApiKey} />
@@ -1314,7 +1315,17 @@ function MiniSparkline({ series, width=120, height=32 }) {
 /* =============================================================================
    OVERVIEW TAB — the headline view (sector tilts, top tokens, concentration)
    ============================================================================= */
-function OverviewTab({ rollup, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey }) {
+function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey }) {
+  const clientEconomics = useMemo(() => {
+    if (selection?.kind !== 'client') return null;
+    const commits = store.commitments.filter(c => c.clientId === selection.id);
+    const totalCommitted = _.sumBy(commits, c => c.committed || 0);
+    const totalCalled = _.sumBy(commits, c => c.called || 0);
+    const pctInvested = totalCommitted > 0 ? (totalCalled / totalCommitted) * 100 : null;
+    const pooledMoic = totalCalled > 0 ? rollup.totalNAV / totalCalled : null;
+    return { totalCommitted, totalCalled, pctInvested, pooledMoic };
+  }, [selection, store.commitments, rollup.totalNAV]);
+
   return (
     <div className="space-y-6">
       {/* PERFORMANCE CHART */}
@@ -1343,6 +1354,17 @@ function OverviewTab({ rollup, priceHistory, historyLoading, historyProgress, ra
         <KPI label="Top-10 concentration" value={fmtPct(rollup.top10, 1)}
              sub={`Top-25: ${fmtPct(rollup.top25, 1)}`} />
       </div>
+
+      {clientEconomics && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KPI label="Total Committed" value={fmtCurrency(clientEconomics.totalCommitted)} />
+          <KPI label="Total Called" value={fmtCurrency(clientEconomics.totalCalled)}
+               sub={`Uncalled ${fmtCurrency(clientEconomics.totalCommitted - clientEconomics.totalCalled)}`} />
+          <KPI label="% Invested" value={clientEconomics.pctInvested != null ? fmtPct(clientEconomics.pctInvested, 1) : '—'} />
+          <KPI label="Pooled Unrealized MOIC" value={fmtMoic(clientEconomics.pooledMoic)}
+               sub="Current NAV ÷ Called" />
+        </div>
+      )}
 
       {/* SECTOR TILTS — the main event */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -1503,6 +1525,11 @@ function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey }) {
               <div className="text-right">
                 <div className="text-lg font-semibold tabular-nums">{fmtCurrency(m.value)}</div>
                 <div className="text-xs" style={{color:TEXT_DIM}}>{fmtPct(m.pct, 1)} of book</div>
+                {(() => {
+                  const called = _.sumBy(store.commitments.filter(c => c.soiId === m.soiId), c => c.called || 0);
+                  const moic = called > 0 ? m.value / called : null;
+                  return <div className="text-xs mt-0.5 tabular-nums" style={{color:TEXT_DIM}}>MOIC {fmtMoic(moic)}</div>;
+                })()}
               </div>
             </div>
             {series.length > 1 && (
@@ -1832,6 +1859,46 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
         <KPI label="Illiquid" value={fmtCurrency(illiquidNAV)} sub={fmtPct(totalNAV>0?(illiquidNAV/totalNAV)*100:0,1)} />
       </div>
 
+      {(() => {
+        const commitment = store.commitments.find(c => c.soiId === soi.id);
+        if (!commitment) {
+          return (
+            <Panel className="p-5">
+              <div className="text-xs uppercase tracking-wider mb-2" style={{color:TEXT_MUTE}}>Fund economics</div>
+              <div className="text-sm" style={{color:TEXT_DIM}}>No commitment linked to this SOI.</div>
+            </Panel>
+          );
+        }
+        const committed = commitment.committed || 0;
+        const called = commitment.called || 0;
+        const distributions = commitment.distributions || 0;
+        const uncalled = committed - called;
+        const pctInvested = committed > 0 ? (called / committed) * 100 : null;
+        const unrealizedMoic = called > 0 ? totalNAV / called : null;
+        const dpi = called > 0 ? distributions / called : null;
+        const tvpi = called > 0 ? (totalNAV + distributions) / called : null;
+        const updateCommitment = (patch) => updateStore(s => ({
+          ...s, commitments: s.commitments.map(c => c.id === commitment.id ? { ...c, ...patch } : c),
+        }));
+        return (
+          <Panel className="p-5">
+            <div className="text-xs uppercase tracking-wider mb-3" style={{color:TEXT_MUTE}}>Fund economics</div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              <NumField label="Commitment" value={committed} onSave={v => updateCommitment({ committed: v })} />
+              <NumField label="Called" value={called} onSave={v => updateCommitment({ called: v })} />
+              <NumField label="Distributions" value={distributions} onSave={v => updateCommitment({ distributions: v })} />
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <Stat label="Uncalled" value={fmtCurrency(uncalled)} />
+              <Stat label="% Invested" value={pctInvested != null ? fmtPct(pctInvested, 1) : '—'} />
+              <Stat label="Unrealized MOIC" value={fmtMoic(unrealizedMoic)} />
+              <Stat label="DPI" value={fmtMoic(dpi)} />
+              <Stat label="TVPI" value={fmtMoic(tvpi)} />
+            </div>
+          </Panel>
+        );
+      })()}
+
       <Panel className="p-5">
         <div className="text-xs uppercase tracking-wider mb-3" style={{color:TEXT_MUTE}}>Sector tilt</div>
         <div className="flex h-3 rounded-full overflow-hidden mb-3" style={{backgroundColor:PANEL_2}}>
@@ -2120,6 +2187,36 @@ function TextInput({ value, onChange, placeholder, type='text', align }) {
       style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} />
   );
 }
+function NumField({ label, value, onSave }) {
+  const [text, setText] = useState(String(value ?? ''));
+  useEffect(() => { setText(String(value ?? '')); }, [value]);
+  const commit = () => {
+    const n = parseNum(text);
+    if (n == null) { setText(String(value ?? '')); return; }
+    if (n !== value) onSave(n);
+  };
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider mb-1" style={{color:TEXT_MUTE}}>{label}</div>
+      <input
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setText(String(value ?? '')); e.currentTarget.blur(); } }}
+        className="w-full px-3 py-2 rounded text-sm outline-none text-right tabular-nums"
+        style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}
+      />
+    </div>
+  );
+}
+function Stat({ label, value }) {
+  return (
+    <div className="px-3 py-2 rounded" style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+      <div className="text-[10px] uppercase tracking-wider" style={{color:TEXT_MUTE}}>{label}</div>
+      <div className="text-sm font-semibold mt-0.5 tabular-nums">{value}</div>
+    </div>
+  );
+}
 function Select({ value, onChange, options }) {
   return (
     <select value={value} onChange={e=>onChange(e.target.value)}
@@ -2331,6 +2428,7 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
       id: uid(), clientId, managerId, soiId,
       committed: parseNum(committed) || _.sumBy(positions, 'soiMarketValue'),
       called: _.sumBy(positions, 'soiMarketValue'),
+      distributions: 0,
     };
 
     nextStore = {
@@ -2702,6 +2800,37 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
     a.click(); URL.revokeObjectURL(url);
   };
 
+  const exportExcel = () => {
+    const wb = XLSX.utils.book_new();
+    const feRows = store.commitments.map(c => {
+      const client = store.clients.find(x => x.id === c.clientId);
+      const mgr = store.managers.find(x => x.id === c.managerId);
+      const soi = store.soIs.find(x => x.id === c.soiId);
+      // TODO: live-price-aware NAV; for now use SOI marked values (consistent with persisted store)
+      const nav = _.sumBy(soi?.positions || [], p => p.soiMarketValue || 0);
+      const committed = c.committed || 0;
+      const called = c.called || 0;
+      const distributions = c.distributions || 0;
+      return {
+        'Client': client?.name || '',
+        'Manager': mgr?.name || '',
+        'Vintage': soi?.vintage || '',
+        'Committed': committed,
+        'Called': called,
+        'Uncalled': committed - called,
+        'Distributions': distributions,
+        '% Invested': committed > 0 ? called / committed : 0,
+        'Current NAV': nav,
+        'Unrealized MOIC': called > 0 ? nav / called : 0,
+        'Realized MOIC': called > 0 ? distributions / called : 0,
+        'TVPI': called > 0 ? (nav + distributions) / called : 0,
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(feRows);
+    XLSX.utils.book_append_sheet(wb, ws, 'Fund Economics');
+    XLSX.writeFile(wb, `catena-export-${today()}.xlsx`);
+  };
+
   const importJSON = (file) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -2759,6 +2888,11 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
               <Upload size={12} /> Import data (JSON)
               <input type="file" accept=".json" className="hidden" onChange={e=>{const f = e.target.files?.[0]; if (f) importJSON(f);}} />
             </label>
+            <button onClick={exportExcel}
+              className="px-3 py-2 rounded text-xs flex items-center gap-1.5 col-span-2"
+              style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
+              <FileSpreadsheet size={12} /> Export Fund Economics (Excel)
+            </button>
           </div>
           <div className="text-[11px] mt-2" style={{color:TEXT_MUTE}}>
             All your clients, managers, SOIs, and preferences in one file. Take it offline, share it with a colleague, back it up.
