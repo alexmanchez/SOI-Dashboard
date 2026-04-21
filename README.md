@@ -33,6 +33,7 @@ Live: https://soi-dashboard.vercel.app
 - **Snapshot-based data model** — each SOI is a snapshot of a manager's
   positions on an as-of date. Quarterly updates overwrite in place or create a
   new vintage.
+- **Client share toggle**: scales all NAV figures to the client's pro-rata called capital fraction, so client-scoped views show true economic exposure.
 - **Excel export** — Fund Economics workbook with Client, Manager, Vintage,
   Committed, Called, Uncalled, Distributions, % Invested, Current NAV,
   Unrealized MOIC, Realized MOIC, and TVPI.

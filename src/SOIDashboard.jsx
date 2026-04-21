@@ -235,6 +235,15 @@ const loadStore = () => {
         delete soi.asOfDate;
       }
     }
+    // Migrate: reset legacy called values that were set to fund total MV
+    for (const c of parsed.commitments) {
+      const soi = parsed.soIs.find(s => s.id === c.soiId);
+      if (!soi) continue;
+      const fundTotalMV = _.sumBy(latestSnapshot(soi)?.positions || [], p => p.soiMarketValue || 0);
+      if (fundTotalMV > 0 && c.called > 0 && Math.abs(c.called - fundTotalMV) / fundTotalMV < 0.01) {
+        c.called = Math.round((c.committed || 0) * 0.7);
+      }
+    }
     return { ...emptyStore(), ...parsed, settings: { ...emptyStore().settings, ...(parsed.settings || {}) } };
   } catch { return null; }
 };
@@ -887,6 +896,9 @@ export default function SOIDashboard() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyProgress, setHistoryProgress] = useState({ current: 0, total: 0, token: '' });
 
+  // Client share mode — scales NAV figures to client's pro-rata called capital fraction
+  const [clientShareMode, setClientShareMode] = useState(true);
+
   // Import wizard state
   const [importOpen, setImportOpen] = useState(false);
 
@@ -956,8 +968,20 @@ export default function SOIDashboard() {
     setHistoryProgress({ current: 0, total: 0, token: '' });
   }, [store.settings.cgApiKey, historyFetched]);
 
+  // Pro-rata scale factor per SOI (client called / fund total MV)
+  const scaleBy = useMemo(() => {
+    if (selection.kind !== 'client' || !clientShareMode) return null;
+    return (soi) => {
+      const commitment = store.commitments.find(c => c.clientId === selection.id && c.soiId === soi.id);
+      if (!commitment) return 1;
+      const fundTotalCalled = _.sumBy(latestSnapshot(soi)?.positions || [], p => p.soiMarketValue || 0);
+      if (fundTotalCalled <= 0) return 1;
+      return (commitment.called || 0) / fundTotalCalled;
+    };
+  }, [selection, store.commitments, store.soIs, clientShareMode]);
+
   // Rollup for current selection
-  const rollup = useMemo(() => computeRollup(store, selection, livePrices, null), [store, selection, livePrices]);
+  const rollup = useMemo(() => computeRollup(store, selection, livePrices, scaleBy), [store, selection, livePrices, scaleBy]);
 
   // Selection label
   const selectionLabel = useMemo(() => {
@@ -995,6 +1019,17 @@ export default function SOIDashboard() {
               selection={selection}
               onChange={(sel) => { setSelection(sel); setDrilldownSoi(null); setTab('overview'); }}
             />
+            {selection.kind === 'client' && (
+              <button onClick={() => setClientShareMode(m => !m)}
+                className="px-2.5 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition-colors"
+                style={{
+                  backgroundColor: clientShareMode ? ACCENT + '22' : 'transparent',
+                  color: clientShareMode ? ACCENT_2 : TEXT_DIM,
+                  border: `1px solid ${clientShareMode ? ACCENT + '44' : BORDER}`,
+                }}>
+                {clientShareMode ? '⊗ Client share' : '⊞ Full fund'}
+              </button>
+            )}
           </div>
 
           <div className="flex-1" />
@@ -1053,6 +1088,9 @@ export default function SOIDashboard() {
           <div className="text-right">
             <div className="text-xs uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Total exposure</div>
             <div className="text-2xl font-semibold">{fmtCurrency(rollup.totalNAV)}</div>
+            {clientShareMode && selection?.kind === 'client' && (
+              <div className="text-[10px] mt-0.5" style={{color: TEXT_DIM}}>Scaled to client's pro-rata share of called capital</div>
+            )}
           </div>
         </div>
 
@@ -1078,11 +1116,13 @@ export default function SOIDashboard() {
           <OverviewTab rollup={rollup} store={store} selection={selection}
             priceHistory={priceHistory} historyLoading={historyLoading} historyProgress={historyProgress}
             range={range} onRangeChange={setRange} onRequestFetch={fetchHistoryFor}
-            apiKey={store.settings.cgApiKey} />
+            apiKey={store.settings.cgApiKey}
+            clientShareMode={clientShareMode} scaleBy={scaleBy} />
         )}
         {rollup.positionCount > 0 && tab === 'managers' && !drilldownSoi && (
           <ManagersTab rollup={rollup} store={store} onDrill={(soiId) => setDrilldownSoi(soiId)}
-            priceHistory={priceHistory} range={range} apiKey={store.settings.cgApiKey} />
+            priceHistory={priceHistory} range={range} apiKey={store.settings.cgApiKey}
+            clientShareMode={clientShareMode} scaleBy={scaleBy} />
         )}
         {rollup.positionCount > 0 && tab === 'managers' && drilldownSoi && (
           <SOIDetail
@@ -1451,7 +1491,7 @@ function MiniSparkline({ series, width=120, height=32 }) {
 /* =============================================================================
    OVERVIEW TAB — the headline view (sector tilts, top tokens, concentration)
    ============================================================================= */
-function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey }) {
+function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, clientShareMode, scaleBy }) {
   const clientEconomics = useMemo(() => {
     if (selection?.kind !== 'client') return null;
     const commits = store.commitments.filter(c => c.clientId === selection.id);
@@ -1462,11 +1502,15 @@ function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, h
     return { totalCommitted, totalCalled, pctInvested, pooledMoic };
   }, [selection, store.commitments, rollup.totalNAV]);
 
+  // Build scaleFn for chart (mirrors scaleBy but using the bundle object)
+  const chartScaleFn = (clientShareMode && selection?.kind === 'client' && scaleBy) ? scaleBy : null;
+
   return (
     <div className="space-y-6">
       {/* PERFORMANCE CHART */}
       <PerformanceChart
         soiBundles={rollup.soIs}
+        scaleFn={chartScaleFn}
         priceHistory={priceHistory}
         historyLoading={historyLoading}
         historyProgress={historyProgress}
@@ -1497,7 +1541,7 @@ function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, h
                sub={`Uncalled ${fmtCurrency(clientEconomics.totalCommitted - clientEconomics.totalCalled)}`} />
           <KPI label="% Invested" value={clientEconomics.pctInvested != null ? fmtPct(clientEconomics.pctInvested, 1) : '—'} />
           <KPI label="Pooled Unrealized MOIC" value={fmtMoic(clientEconomics.pooledMoic)}
-               sub="Current NAV ÷ Called" />
+               sub={clientShareMode && selection?.kind === 'client' ? 'Client NAV ÷ Called' : 'Current NAV ÷ Called'} />
         </div>
       )}
 
@@ -1624,7 +1668,7 @@ function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, h
 /* =============================================================================
    MANAGERS TAB — list of manager/vintage cards, click to drill into SOI detail
    ============================================================================= */
-function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey }) {
+function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clientShareMode, scaleBy }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       {rollup.managerBreakdown.map(m => {
@@ -1648,6 +1692,10 @@ function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey }) {
           const val = _.sumBy(items, p => p.soiMarketValue || 0);
           return { id: sid, label: sectorOf(sid).label, color: sectorOf(sid).color, value: val };
         }).sort((a,b) => b.value - a.value).slice(0, 5);
+
+        // Compute share % for client share mode display
+        const sharePct = m._scale != null ? m._scale * 100 : null;
+
         return (
           <Panel key={m.soiId} className="p-5 hover:cursor-pointer transition-colors"
             style={{ borderColor: BORDER }}
@@ -1659,6 +1707,11 @@ function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey }) {
               </div>
               <div className="text-right">
                 <div className="text-lg font-semibold tabular-nums">{fmtCurrency(m.value)}</div>
+                {clientShareMode && sharePct != null && (
+                  <div className="text-[11px]" style={{color:TEXT_DIM}}>
+                    {fmtPct(sharePct, 1)} share of fund
+                  </div>
+                )}
                 <div className="text-xs" style={{color:TEXT_DIM}}>{fmtPct(m.pct, 1)} of book</div>
                 {(() => {
                   const called = _.sumBy(store.commitments.filter(c => c.soiId === m.soiId), c => c.called || 0);
@@ -2089,6 +2142,16 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
               <Stat label="DPI" value={fmtMoic(dpi)} />
               <Stat label="TVPI" value={fmtMoic(tvpi)} />
             </div>
+            {(() => {
+              const fundTotalCalled = _.sumBy(latestSnapshot(soi)?.positions||[], p=>p.soiMarketValue||0);
+              const shareOfFund = fundTotalCalled > 0 ? (called/fundTotalCalled)*100 : null;
+              return (
+                <div className="grid grid-cols-2 gap-2 pt-2 mt-2" style={{borderTop: `1px solid ${BORDER}`}}>
+                  <Stat label="Fund Total NAV" value={fmtCurrency(fundTotalCalled)} />
+                  <Stat label="Your Share of Fund" value={shareOfFund != null ? fmtPct(shareOfFund, 2) : '—'} />
+                </div>
+              );
+            })()}
           </Panel>
         );
       })()}
@@ -3032,6 +3095,9 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
         'Distributions': distributions,
         '% Invested': committed > 0 ? called / committed : 0,
         'Current NAV': nav,
+        'Fund NAV (unscaled)': nav,
+        'Client NAV (scaled)': nav > 0 ? (called / nav) * nav : nav,
+        'Client Share %': nav > 0 ? (called / nav) * 100 : 0,
         'Unrealized MOIC': called > 0 ? nav / called : 0,
         'Realized MOIC': called > 0 ? distributions / called : 0,
         'TVPI': called > 0 ? (nav + distributions) / called : 0,
