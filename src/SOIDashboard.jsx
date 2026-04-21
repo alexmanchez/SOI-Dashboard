@@ -24,17 +24,19 @@ const RED       = '#EF4444';
 const GOLD      = '#D4A54A';
 const VIOLET    = '#A78BFA';
 
-// GICS-style 5-bucket taxonomy (pinned — don't add buckets casually)
-const SECTORS = [
+// GICS-style 5-bucket taxonomy seed (user can add/edit/remove in Settings)
+const DEFAULT_SECTORS = [
   { id: 'infrastructure', label: 'Infrastructure',     color: ACCENT,  desc: 'L1s, L2s, scaling, execution layers' },
   { id: 'defi',           label: 'DeFi',               color: GREEN,   desc: 'Lending, DEXes, perps, stablecoin protocols' },
   { id: 'middleware',     label: 'Middleware',         color: VIOLET,  desc: 'Oracles, restaking, data, compute, identity' },
   { id: 'applications',   label: 'Applications',       color: GOLD,    desc: 'Consumer, gaming, social, AI agents' },
   { id: 'stablecoins',    label: 'Stablecoins & Cash', color: TEXT_DIM, desc: 'USDC, USDT, DAI, cash' },
 ];
-const SECTOR_BY_ID = Object.fromEntries(SECTORS.map(s => [s.id, s]));
+// Module-level mutable ref. Reassigned from store.sectors at top of SOIDashboard render,
+// before any useMemo/compute runs, so all downstream consumers see the current list.
+let SECTORS = DEFAULT_SECTORS;
 const UNCLASSIFIED = { id: 'unclassified', label: 'Unclassified', color: '#6B7280' };
-const sectorOf = (id) => SECTOR_BY_ID[id] || UNCLASSIFIED;
+const sectorOf = (id) => SECTORS.find(s => s.id === id) || UNCLASSIFIED;
 
 // Canonical token → sector map (seed; user can override in Settings)
 const DEFAULT_TOKEN_SECTOR = {
@@ -211,7 +213,8 @@ const today = () => new Date().toISOString().slice(0,10);
 const STORE_KEY = 'catena.store.v1';
 const emptyStore = () => ({
   clients: [], managers: [], soIs: [], commitments: [],
-  sectorOverrides: {}, settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null },
+  sectorOverrides: {}, sectors: DEFAULT_SECTORS,
+  settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null },
 });
 
 const loadStore = () => {
@@ -230,6 +233,8 @@ const loadStore = () => {
         }
       }
     }
+    // Migrate: ensure sectors array exists for pre-Stage-4 stores
+    if (!Array.isArray(parsed.sectors) || parsed.sectors.length === 0) parsed.sectors = DEFAULT_SECTORS;
     return { ...emptyStore(), ...parsed, settings: { ...emptyStore().settings, ...(parsed.settings || {}) } };
   } catch { return null; }
 };
@@ -348,6 +353,7 @@ const seedStore = () => {
       { id: uid(), clientId, managerId: hackId, soiId: hack2Id, committed: 40_000_000, called: sumMV(hack2Positions), distributions: 0 },
     ],
     sectorOverrides: {},
+    sectors: DEFAULT_SECTORS,
     settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null },
   };
 };
@@ -734,6 +740,8 @@ export default function SOIDashboard() {
     if (loaded && (loaded.soIs.length || loaded.clients.length)) return loaded;
     return seedStore();
   });
+  // Sync module-level SECTORS ref to the live store list before any child render / useMemo.
+  SECTORS = (store.sectors && store.sectors.length) ? store.sectors : DEFAULT_SECTORS;
   useEffect(() => { saveStore(store); }, [store]);
 
   // Top-level navigation: selection + tab
@@ -3000,7 +3008,7 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
           </div>
 
           {/* SOIs */}
-          <div>
+          <div className="mb-4">
             <div className="text-[11px] mb-1.5 flex items-center gap-1.5" style={{color: TEXT_DIM}}>
               <Building2 size={11} /> SOIs ({store.soIs.length})
             </div>
@@ -3025,6 +3033,19 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
                 );
               })}
             </div>
+          </div>
+
+          {/* Sectors */}
+          <div>
+            <div className="text-[11px] mb-1.5 flex items-center gap-1.5" style={{color: TEXT_DIM}}>
+              <Layers size={11} /> Sectors ({(store.sectors || []).length})
+            </div>
+            <div className="space-y-1 mb-2">
+              {(store.sectors || []).map(sec => (
+                <SectorRow key={sec.id} sector={sec} store={store} updateStore={updateStore} />
+              ))}
+            </div>
+            <SectorAddForm updateStore={updateStore} />
           </div>
         </div>
       </div>
@@ -3088,6 +3109,148 @@ function ManageRow({ title, subtitle, editFields, onSave, onDelete, deleteWarnin
             <button onClick={() => setConfirmingDelete(true)} className="p-1 rounded" style={{color: RED}} title="Delete"><Trash2 size={14} /></button>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function SectorRow({ sector, store, updateStore }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(sector.label);
+  const [color, setColor] = useState(sector.color);
+  const [desc, setDesc] = useState(sector.desc || '');
+  const [deleting, setDeleting] = useState(false);
+  const [replacementId, setReplacementId] = useState('');
+
+  const useCount = useMemo(() => {
+    let n = 0;
+    for (const soi of store.soIs) for (const p of (soi.positions || [])) if (p.sectorId === sector.id) n++;
+    for (const id of Object.values(store.sectorOverrides || {})) if (id === sector.id) n++;
+    return n;
+  }, [store, sector.id]);
+
+  const otherSectors = (store.sectors || []).filter(s => s.id !== sector.id);
+
+  const save = () => {
+    const label = name.trim() || sector.label;
+    updateStore(s => ({ ...s, sectors: (s.sectors || []).map(x => x.id === sector.id ? { ...x, label, color, desc } : x) }));
+    setEditing(false);
+  };
+
+  const doDelete = () => {
+    updateStore(s => {
+      const repl = replacementId || null;
+      const nextSoIs = s.soIs.map(soi => ({
+        ...soi,
+        positions: (soi.positions || []).map(p => p.sectorId === sector.id ? { ...p, sectorId: repl } : p),
+      }));
+      const nextOverrides = { ...(s.sectorOverrides || {}) };
+      for (const [k, id] of Object.entries(nextOverrides)) {
+        if (id === sector.id) { if (repl) nextOverrides[k] = repl; else delete nextOverrides[k]; }
+      }
+      return { ...s, sectors: (s.sectors || []).filter(x => x.id !== sector.id), soIs: nextSoIs, sectorOverrides: nextOverrides };
+    });
+    setDeleting(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="p-2 rounded space-y-2" style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+        <div className="flex items-center gap-2">
+          <input type="color" value={color} onChange={e=>setColor(e.target.value)}
+            className="w-8 h-8 rounded cursor-pointer flex-shrink-0" style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}} />
+          <input value={name} onChange={e=>setName(e.target.value)} placeholder="Name"
+            className="flex-1 px-2 py-1.5 rounded text-sm outline-none"
+            style={{backgroundColor: PANEL, color: TEXT, border: `1px solid ${BORDER}`}} />
+        </div>
+        <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Description"
+          className="w-full px-2 py-1.5 rounded text-sm outline-none"
+          style={{backgroundColor: PANEL, color: TEXT, border: `1px solid ${BORDER}`}} />
+        <div className="flex justify-end gap-1">
+          <button onClick={save} className="px-2.5 py-1 rounded text-xs font-medium" style={{backgroundColor: ACCENT, color: BG}}>Save</button>
+          <button onClick={()=>setEditing(false)} className="px-2.5 py-1 rounded text-xs" style={{color: TEXT_DIM, border: `1px solid ${BORDER}`}}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (deleting) {
+    return (
+      <div className="p-2 rounded space-y-2" style={{backgroundColor: PANEL_2, border: `1px solid ${RED}66`}}>
+        <div className="text-sm">Delete <span style={{color: sector.color}}>{sector.label}</span>?</div>
+        {useCount > 0 ? (
+          <>
+            <div className="text-xs" style={{color: TEXT_DIM}}>
+              {useCount} position reference{useCount===1?'':'s'} will be reassigned.
+            </div>
+            <select value={replacementId} onChange={e=>setReplacementId(e.target.value)}
+              className="w-full px-2 py-1.5 rounded text-sm outline-none"
+              style={{backgroundColor: PANEL, color: TEXT, border: `1px solid ${BORDER}`}}>
+              <option value="">Unclassified</option>
+              {otherSectors.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </>
+        ) : (
+          <div className="text-xs" style={{color: TEXT_DIM}}>No positions use this sector.</div>
+        )}
+        <div className="flex justify-end gap-1">
+          <button onClick={doDelete} className="px-2.5 py-1 rounded text-xs font-medium" style={{backgroundColor: RED, color: TEXT}}>Delete</button>
+          <button onClick={()=>setDeleting(false)} className="px-2.5 py-1 rounded text-xs" style={{color: TEXT_DIM, border: `1px solid ${BORDER}`}}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between p-2 rounded text-sm gap-2"
+      style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+      <div className="flex items-center gap-2 flex-1 min-w-0">
+        <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{backgroundColor: sector.color}} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate">{sector.label}</div>
+          {sector.desc && <div className="text-[11px] truncate" style={{color: TEXT_DIM}}>{sector.desc}</div>}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="text-[10px] mr-1" style={{color: TEXT_MUTE}}>{useCount} use{useCount===1?'':'s'}</div>
+        <button onClick={()=>setEditing(true)} className="p-1 rounded" style={{color: TEXT_DIM}} title="Edit"><Edit2 size={14} /></button>
+        <button onClick={()=>setDeleting(true)} className="p-1 rounded" style={{color: RED}} title="Delete"><Trash2 size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
+function SectorAddForm({ updateStore }) {
+  const [name, setName] = useState('');
+  const [color, setColor] = useState('#4A9EFF');
+  const [desc, setDesc] = useState('');
+  const submit = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const slug = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'sector';
+    const id = `${slug}-${uid().slice(0, 4)}`;
+    updateStore(s => ({ ...s, sectors: [...(s.sectors || []), { id, label: trimmed, color, desc }] }));
+    setName(''); setDesc('');
+  };
+  return (
+    <div className="p-2 rounded space-y-2" style={{backgroundColor: PANEL_2, border: `1px dashed ${BORDER}`}}>
+      <div className="text-[11px]" style={{color: TEXT_DIM}}>Add a sector</div>
+      <div className="flex items-center gap-2">
+        <input type="color" value={color} onChange={e=>setColor(e.target.value)}
+          className="w-8 h-8 rounded cursor-pointer flex-shrink-0" style={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}} />
+        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Name"
+          className="flex-1 px-2 py-1.5 rounded text-sm outline-none"
+          style={{backgroundColor: PANEL, color: TEXT, border: `1px solid ${BORDER}`}} />
+      </div>
+      <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Description (optional)"
+        className="w-full px-2 py-1.5 rounded text-sm outline-none"
+        style={{backgroundColor: PANEL, color: TEXT, border: `1px solid ${BORDER}`}} />
+      <div className="flex justify-end">
+        <button onClick={submit} disabled={!name.trim()}
+          className="px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1"
+          style={{backgroundColor: ACCENT, color: BG, opacity: name.trim() ? 1 : 0.5}}>
+          <Plus size={12} /> Add sector
+        </button>
       </div>
     </div>
   );
