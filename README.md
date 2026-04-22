@@ -34,6 +34,7 @@ Live: https://soi-dashboard.vercel.app
   positions on an as-of date. Quarterly updates overwrite in place or create a
   new vintage.
 - **Client share toggle**: scales all NAV figures to the client's pro-rata called capital fraction, so client-scoped views show true economic exposure.
+- **Fund-of-Funds support** — mark any manager as a FoF, add sub-commitments per snapshot, and get automatic look-through in client-scoped rollups (1-level deep). SOI Detail shows an Underlying Commitments grid; manager cards display an FoF badge; Excel export includes a dedicated FoF Commitments sheet.
 - **Excel export** — Fund Economics workbook with Client, Manager, Vintage,
   Committed, Called, Uncalled, Distributions, % Invested, Current NAV,
   Unrealized MOIC, Realized MOIC, and TVPI.

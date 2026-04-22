@@ -244,6 +244,16 @@ const loadStore = () => {
         c.called = Math.round((c.committed || 0) * 0.7);
       }
     }
+    // Migrate: add type field to managers (default 'direct' for pre-Stage-6 stores)
+    for (const m of parsed.managers) {
+      if (!m.type) m.type = 'direct';
+    }
+    // Migrate: add subCommitments array to every snapshot (default [] for pre-Stage-6 stores)
+    for (const soi of parsed.soIs) {
+      for (const snap of snapshotsOf(soi)) {
+        if (!Array.isArray(snap.subCommitments)) snap.subCommitments = [];
+      }
+    }
     return { ...emptyStore(), ...parsed, settings: { ...emptyStore().settings, ...(parsed.settings || {}) } };
   } catch { return null; }
 };
@@ -258,6 +268,7 @@ const seedStore = () => {
   const clientId = uid();
   const fwId = uid(), hackId = uid();
   const fw3Id = uid(), fw4Id = uid(), hack1Id = uid(), hack2Id = uid();
+  const atlasId = uid(), atlasFundId = uid();
 
   const mkPos = (name, ticker, qty, price, mv, sectorId, date, opts={}) => ({
     id: uid(),
@@ -361,23 +372,33 @@ const seedStore = () => {
   return {
     clients: [{ id: clientId, name: 'Sample Client Portfolio', notes: 'Seed demo client — illustrative only. All manager names, positions, and values are fictional.' }],
     managers: [
-      { id: fwId,   name: 'Meridian Digital Capital', firm: 'Meridian' },
-      { id: hackId, name: 'Helix Crypto Partners',    firm: 'Helix' },
+      { id: fwId,    name: 'Meridian Digital Capital', firm: 'Meridian', type: 'direct' },
+      { id: hackId,  name: 'Helix Crypto Partners',    firm: 'Helix',    type: 'direct' },
+      { id: atlasId, name: 'Atlas Capital Partners',   firm: 'Atlas',    type: 'fund_of_funds' },
     ],
     soIs: [
-      { id: fw3Id,   managerId: fwId,   vintage: 'Fund III', snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '', positions: fw3Positions }] },
-      { id: fw4Id,   managerId: fwId,   vintage: 'Fund IV',  snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '', positions: fw4Positions }] },
-      { id: hack1Id, managerId: hackId, vintage: 'Fund I',   snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '', positions: hack1Positions }] },
-      { id: hack2Id, managerId: hackId, vintage: 'Fund II',  snapshots: [
-        { id: uid(), asOfDate: '2025-06-30', notes: 'Q2 2025 statement', positions: hack2PositionsOld },
-        { id: uid(), asOfDate: '2025-09-30', notes: 'Q3 2025 statement', positions: hack2Positions  },
+      { id: fw3Id,      managerId: fwId,    vintage: 'Fund III',        snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '',                   positions: fw3Positions,  subCommitments: [] }] },
+      { id: fw4Id,      managerId: fwId,    vintage: 'Fund IV',         snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '',                   positions: fw4Positions,  subCommitments: [] }] },
+      { id: hack1Id,    managerId: hackId,  vintage: 'Fund I',          snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '',                   positions: hack1Positions, subCommitments: [] }] },
+      { id: hack2Id,    managerId: hackId,  vintage: 'Fund II',         snapshots: [
+        { id: uid(), asOfDate: '2025-06-30', notes: 'Q2 2025 statement', positions: hack2PositionsOld, subCommitments: [] },
+        { id: uid(), asOfDate: '2025-09-30', notes: 'Q3 2025 statement', positions: hack2Positions,    subCommitments: [] },
       ]},
+      { id: atlasFundId, managerId: atlasId, vintage: 'Blockchain Fund II', snapshots: [{
+        id: uid(), asOfDate: '2025-09-30', notes: 'Q3 2025 — FoF look-through statement', positions: [],
+        subCommitments: [
+          { id: uid(), toSoiId: fw4Id,   committed: 5_000_000, called: 3_500_000, distributions: 0 },
+          { id: uid(), toSoiId: hack1Id, committed: 3_000_000, called: 2_100_000, distributions: 0 },
+          { id: uid(), toSoiId: hack2Id, committed: 8_000_000, called: 5_600_000, distributions: 0 },
+        ],
+      }]},
     ],
     commitments: [
-      { id: uid(), clientId, managerId: fwId,   soiId: fw3Id,   committed: 3_000_000, called: Math.round(3_000_000*0.7), distributions: 800_000 },
-      { id: uid(), clientId, managerId: fwId,   soiId: fw4Id,   committed: 5_000_000, called: Math.round(5_000_000*0.7), distributions: 200_000 },
-      { id: uid(), clientId, managerId: hackId, soiId: hack1Id, committed: 2_000_000, called: Math.round(2_000_000*0.7), distributions: 500_000 },
-      { id: uid(), clientId, managerId: hackId, soiId: hack2Id, committed: 8_000_000, called: Math.round(8_000_000*0.7), distributions: 0 },
+      { id: uid(), clientId, managerId: fwId,    soiId: fw3Id,      committed: 3_000_000, called: Math.round(3_000_000*0.7), distributions: 800_000 },
+      { id: uid(), clientId, managerId: fwId,    soiId: fw4Id,      committed: 5_000_000, called: Math.round(5_000_000*0.7), distributions: 200_000 },
+      { id: uid(), clientId, managerId: hackId,  soiId: hack1Id,    committed: 2_000_000, called: Math.round(2_000_000*0.7), distributions: 500_000 },
+      { id: uid(), clientId, managerId: hackId,  soiId: hack2Id,    committed: 8_000_000, called: Math.round(8_000_000*0.7), distributions: 0 },
+      { id: uid(), clientId, managerId: atlasId, soiId: atlasFundId, committed: 4_000_000, called: 2_800_000, distributions: 0 },
     ],
     sectorOverrides: {},
     sectors: DEFAULT_SECTORS,
@@ -445,32 +466,83 @@ const computeRollup = (store, selection, livePrices, scaleBy = null) => {
 
   // Per-position enrichment
   const enriched = [];
+  let fofLookThroughCount = 0;
+
+  const enrichPosition = (p, opts) => {
+    const { sectorId, liquid, managerId, managerName, vintage, soiId, scale } = opts;
+    const live = p.cgTokenId && livePrices[p.cgTokenId];
+    const useLive = !!live && (liquid || p.forceLiquid);
+    const currentValue = useLive && p.quantity ? p.quantity * live.usd : p.soiMarketValue;
+    const change24h = useLive ? (live.change24h ?? null) : null;
+    enriched.push({
+      ...p,
+      sectorId, liquid, managerId, managerName, vintage, soiId,
+      soiMarketValue: (p.soiMarketValue || 0) * scale,
+      currentValue: currentValue * scale,
+      change24h, hasLivePrice: useLive,
+      livePrice: useLive ? live.usd : null,
+      _scale: scale,
+    });
+  };
+
   for (const soi of soIs) {
     const manager = managerById[soi.managerId];
+    const isFoF = manager?.type === 'fund_of_funds';
+
+    // FoF look-through: only in client scope
+    if (isFoF && selection.kind === 'client') {
+      const clientCommitment = store.commitments.find(c => c.clientId === selection.id && c.soiId === soi.id);
+      if (!clientCommitment) continue;
+      const subCommitments = latestSnapshot(soi)?.subCommitments || [];
+      const fofTotalCalled = _.sumBy(subCommitments, s => s.called || 0);
+      if (!subCommitments.length || fofTotalCalled <= 0) continue;
+
+      const clientCalled = clientCommitment.called || 0;
+      const clientShare = clientCalled / fofTotalCalled;
+      fofLookThroughCount++;
+
+      for (const sub of subCommitments) {
+        const targetSoi = store.soIs.find(s => s.id === sub.toSoiId);
+        if (!targetSoi) continue;
+        const targetManager = managerById[targetSoi.managerId];
+        if (targetManager?.type === 'fund_of_funds') {
+          console.warn('Catena: nested FoF beyond 1 level — skipping', sub.toSoiId);
+          continue;
+        }
+        const underlyingPositions = latestSnapshot(targetSoi)?.positions || [];
+        const underlyingMV = _.sumBy(underlyingPositions, p => p.soiMarketValue || 0);
+        if (underlyingMV <= 0) continue;
+        const fofShare = (sub.called || 0) / underlyingMV;
+        const scale = clientShare * fofShare;
+
+        for (const p of underlyingPositions) {
+          const sectorId = resolveSector(p, store.sectorOverrides);
+          const liquid = isLiquid(p);
+          enrichPosition(p, {
+            sectorId, liquid,
+            managerId: soi.managerId,
+            managerName: `${manager?.name || 'Unknown'} → ${targetManager?.name || '?'}`,
+            vintage: `${soi.vintage} → ${targetSoi.vintage}`,
+            soiId: soi.id,
+            scale,
+          });
+        }
+      }
+      continue; // done with this FoF SOI
+    }
+
+    // Direct SOI (existing logic)
     const scale = scaleBy ? (scaleBy(soi) ?? 1) : 1;
     for (const p of (latestSnapshot(soi)?.positions || [])) {
       const sectorId = resolveSector(p, store.sectorOverrides);
       const liquid = isLiquid(p);
-      const live = p.cgTokenId && livePrices[p.cgTokenId];
-      const useLive = !!live && (liquid || p.forceLiquid);
-      const currentValue = useLive && p.quantity
-        ? p.quantity * live.usd
-        : p.soiMarketValue;
-      const change24h = useLive ? (live.change24h ?? null) : null;
-      enriched.push({
-        ...p,
-        sectorId,
-        liquid,
+      enrichPosition(p, {
+        sectorId, liquid,
         managerId: soi.managerId,
         managerName: manager?.name || 'Unknown',
         vintage: soi.vintage,
         soiId: soi.id,
-        soiMarketValue: (p.soiMarketValue || 0) * scale,
-        currentValue: currentValue * scale,
-        change24h,
-        hasLivePrice: useLive,
-        livePrice: useLive ? live.usd : null,
-        _scale: scale,
+        scale,
       });
     }
   }
@@ -564,6 +636,7 @@ const computeRollup = (store, selection, livePrices, scaleBy = null) => {
     positionCount: enriched.length,
     managerCount: new Set(enriched.map(p=>p.managerId)).size,
     soiCount: soIs.length,
+    fofLookThroughCount,
   };
 };
 
@@ -1523,6 +1596,13 @@ function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, h
       />
 
       {/* KPI ROW */}
+      {rollup.fofLookThroughCount > 0 && (
+        <div className="text-xs px-3 py-1.5 rounded flex items-center gap-2"
+          style={{backgroundColor: VIOLET+'11', color: VIOLET, border: `1px solid ${VIOLET}33`}}>
+          <TrendingUp size={12} />
+          Look-through from {rollup.fofLookThroughCount} fund-of-fund{rollup.fofLookThroughCount===1?'':'s'} applied — positions reflect underlying exposure
+        </div>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KPI label="Total Exposure" value={fmtCurrency(rollup.totalNAV)}
              sub={`${rollup.positionCount} positions in ${rollup.soiCount} SOI${rollup.soiCount===1?'':'s'}`} />
@@ -1673,6 +1753,7 @@ function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clie
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       {rollup.managerBreakdown.map(m => {
         const soi = store.soIs.find(s => s.id === m.soiId);
+        const mgr = store.managers.find(mg => mg.id === m.managerId);
         const positions = (latestSnapshot(soi)?.positions || []).map(p => {
           const sectorId = resolveSector(p, store.sectorOverrides);
           const liquid = isLiquid(p);
@@ -1702,7 +1783,13 @@ function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clie
             onClick={() => onDrill(m.soiId)}>
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">
-                <div className="text-base font-semibold">{m.managerName}</div>
+                <div className="text-base font-semibold flex items-center gap-2">
+                  {m.managerName}
+                  {mgr?.type === 'fund_of_funds' && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                      style={{backgroundColor: VIOLET+'22', color: VIOLET, border: `1px solid ${VIOLET}44`}}>FoF</span>
+                  )}
+                </div>
                 <div className="text-xs" style={{color:TEXT_DIM}}>{m.vintage} • As of {m.asOfDate || '—'}</div>
               </div>
               <div className="text-right">
@@ -2156,6 +2243,64 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
         );
       })()}
 
+      {/* Underlying Commitments — only shown for FoF SOIs */}
+      {manager?.type === 'fund_of_funds' && (() => {
+        const subCommitments = selectedSnap?.subCommitments || [];
+        const fofTotalCalled = _.sumBy(subCommitments, s => s.called || 0);
+        return (
+          <Panel className="p-5">
+            <div className="text-xs uppercase tracking-wider mb-3" style={{color:TEXT_MUTE}}>
+              Underlying Manager Commitments ({subCommitments.length})
+            </div>
+            {subCommitments.length === 0 ? (
+              <div className="text-sm" style={{color:TEXT_DIM}}>No sub-commitments in this snapshot.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{color:TEXT_MUTE, fontSize:11, textTransform:'uppercase', letterSpacing:'0.05em', borderBottom:`1px solid ${BORDER}`}}>
+                      <th className="text-left px-3 py-2">Fund</th>
+                      <th className="text-right px-3 py-2">Committed</th>
+                      <th className="text-right px-3 py-2">Called</th>
+                      <th className="text-right px-3 py-2">Distributions</th>
+                      <th className="text-right px-3 py-2">Underlying NAV</th>
+                      <th className="text-right px-3 py-2">FoF Share %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {subCommitments.map(sub => {
+                      const targetSoi = store.soIs.find(s => s.id === sub.toSoiId);
+                      const targetMgr = targetSoi ? store.managers.find(mm => mm.id === targetSoi.managerId) : null;
+                      const underlyingMV = _.sumBy(latestSnapshot(targetSoi)?.positions || [], p => p.soiMarketValue || 0);
+                      const fofSharePct = underlyingMV > 0 ? (sub.called || 0) / underlyingMV * 100 : null;
+                      const pctOfFoF = fofTotalCalled > 0 ? (sub.called || 0) / fofTotalCalled * 100 : null;
+                      return (
+                        <tr key={sub.id} style={{borderBottom:`1px solid ${BORDER}`}}>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium">{targetMgr?.name || '?'}</div>
+                            <div className="text-[10px]" style={{color:TEXT_DIM}}>{targetSoi?.vintage || '—'}</div>
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{fmtCurrency(sub.committed)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">
+                            {fmtCurrency(sub.called)}
+                            {pctOfFoF != null && <div className="text-[10px]" style={{color:TEXT_DIM}}>{fmtPct(pctOfFoF, 1)} of FoF</div>}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{fmtCurrency(sub.distributions)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{underlyingMV > 0 ? fmtCurrency(underlyingMV) : '—'}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">
+                            {fofSharePct != null ? <span style={{color: ACCENT_2}}>{fmtPct(fofSharePct, 2)}</span> : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
+        );
+      })()}
+
       <Panel className="p-5">
         <div className="text-xs uppercase tracking-wider mb-3" style={{color:TEXT_MUTE}}>Sector tilt</div>
         <div className="flex h-3 rounded-full overflow-hidden mb-3" style={{backgroundColor:PANEL_2}}>
@@ -2519,6 +2664,7 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
   const [newClientName, setNewClientName] = useState('');
   const [assignManagerId, setAssignManagerId] = useState(prefilledManager?.id || '');
   const [newManagerName, setNewManagerName] = useState('');
+  const [newManagerType, setNewManagerType] = useState('direct');
   const [vintage, setVintage] = useState(prefilledSoi?.vintage || '');
   const [asOfDate, setAsOfDate] = useState(today());
   const [committed, setCommitted] = useState('');
@@ -2683,7 +2829,7 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
     let managerId = assignManagerId;
     if (managerId === '__new__' || !managerId) {
       managerId = uid();
-      nextStore = { ...nextStore, managers: [...nextStore.managers, { id: managerId, name: newManagerName || 'New Manager', firm: '' }] };
+      nextStore = { ...nextStore, managers: [...nextStore.managers, { id: managerId, name: newManagerName || 'New Manager', firm: '', type: newManagerType || 'direct' }] };
     }
 
     const soiId = uid();
@@ -2870,9 +3016,17 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
                 <option value="__new__">+ New manager…</option>
               </select>
               {(assignManagerId === '__new__' || (!assignManagerId && store.managers.length === 0)) && (
-                <input value={newManagerName} onChange={e=>setNewManagerName(e.target.value)} placeholder="Manager name (e.g., Dragonfly)"
-                  className="w-full mt-2 px-3 py-2 rounded text-sm outline-none"
-                  style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} />
+                <>
+                  <input value={newManagerName} onChange={e=>setNewManagerName(e.target.value)} placeholder="Manager name (e.g., Dragonfly)"
+                    className="w-full mt-2 px-3 py-2 rounded text-sm outline-none"
+                    style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} />
+                  <select value={newManagerType} onChange={e=>setNewManagerType(e.target.value)}
+                    className="w-full mt-2 px-3 py-2 rounded text-sm outline-none"
+                    style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
+                    <option value="direct">Direct fund manager</option>
+                    <option value="fund_of_funds">Fund-of-Funds manager</option>
+                  </select>
+                </>
               )}
             </div>
             <div>
@@ -3105,6 +3259,40 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
     });
     const ws = XLSX.utils.json_to_sheet(feRows);
     XLSX.utils.book_append_sheet(wb, ws, 'Fund Economics');
+
+    // FoF Commitments sheet — sub-commitments from all fund-of-funds managers
+    const fofManagers = store.managers.filter(m => m.type === 'fund_of_funds');
+    if (fofManagers.length > 0) {
+      const fofRows = [];
+      for (const fofMgr of fofManagers) {
+        const fofSois = store.soIs.filter(s => s.managerId === fofMgr.id);
+        for (const fofSoi of fofSois) {
+          const snap = latestSnapshot(fofSoi);
+          for (const sub of (snap?.subCommitments || [])) {
+            const targetSoi = store.soIs.find(s => s.id === sub.toSoiId);
+            const targetMgr = targetSoi ? store.managers.find(m => m.id === targetSoi.managerId) : null;
+            const underlyingMV = _.sumBy(latestSnapshot(targetSoi)?.positions || [], p => p.soiMarketValue || 0);
+            fofRows.push({
+              'FoF Manager': fofMgr.name,
+              'FoF Fund': fofSoi.vintage,
+              'As-of Date': snap?.asOfDate || '',
+              'Underlying Manager': targetMgr?.name || '?',
+              'Underlying Fund': targetSoi?.vintage || '?',
+              'Committed': sub.committed || 0,
+              'Called': sub.called || 0,
+              'Distributions': sub.distributions || 0,
+              'Underlying NAV': underlyingMV,
+              'FoF Share %': underlyingMV > 0 ? (sub.called || 0) / underlyingMV : 0,
+            });
+          }
+        }
+      }
+      if (fofRows.length > 0) {
+        const wsFof = XLSX.utils.json_to_sheet(fofRows);
+        XLSX.utils.book_append_sheet(wb, wsFof, 'FoF Commitments');
+      }
+    }
+
     XLSX.writeFile(wb, `catena-export-${today()}.xlsx`);
   };
 
@@ -3257,20 +3445,36 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
               {store.managers.map(m => {
                 const soiCount = store.soIs.filter(x => x.managerId === m.id).length;
                 const commitCount = store.commitments.filter(x => x.managerId === m.id).length;
-                const subtitle = [m.firm, `${soiCount} SOI${soiCount===1?'':'s'}`, `${commitCount} commitment${commitCount===1?'':'s'}`].filter(Boolean).join(' · ');
+                const isFoF = m.type === 'fund_of_funds';
+                const subtitle = [m.firm, `${soiCount} SOI${soiCount===1?'':'s'}`, `${commitCount} commitment${commitCount===1?'':'s'}`, isFoF ? 'Fund-of-Funds' : 'Direct'].filter(Boolean).join(' · ');
                 return (
-                  <ManageRow
-                    key={m.id}
-                    title={m.name}
-                    subtitle={subtitle}
-                    editFields={[
-                      { label: 'Name', value: m.name, placeholder: 'Manager name' },
-                      { label: 'Firm',  value: m.firm || '', placeholder: 'Firm (optional)' },
-                    ]}
-                    onSave={([name, firm]) => { if (name) updateStore(s => ({ ...s, managers: s.managers.map(x => x.id === m.id ? { ...x, name, firm } : x) })); }}
-                    onDelete={() => deleteManager(m.id)}
-                    deleteWarning={`Also removes ${soiCount} SOI${soiCount===1?'':'s'} and ${commitCount} commitment${commitCount===1?'':'s'}`}
-                  />
+                  <div key={m.id} className="space-y-0.5">
+                    <ManageRow
+                      title={m.name}
+                      subtitle={subtitle}
+                      editFields={[
+                        { label: 'Name', value: m.name, placeholder: 'Manager name' },
+                        { label: 'Firm',  value: m.firm || '', placeholder: 'Firm (optional)' },
+                      ]}
+                      onSave={([name, firm]) => { if (name) updateStore(s => ({ ...s, managers: s.managers.map(x => x.id === m.id ? { ...x, name, firm } : x) })); }}
+                      onDelete={() => deleteManager(m.id)}
+                      deleteWarning={`Also removes ${soiCount} SOI${soiCount===1?'':'s'} and ${commitCount} commitment${commitCount===1?'':'s'}`}
+                    />
+                    <div className="flex items-center justify-end gap-1 px-1">
+                      <span className="text-[10px]" style={{color:TEXT_MUTE}}>Type:</span>
+                      <button
+                        onClick={() => updateStore(s => ({ ...s, managers: s.managers.map(x => x.id === m.id ? { ...x, type: isFoF ? 'direct' : 'fund_of_funds' } : x) }))}
+                        className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                        style={{
+                          backgroundColor: isFoF ? VIOLET+'22' : PANEL_2,
+                          color: isFoF ? VIOLET : TEXT_DIM,
+                          border: `1px solid ${isFoF ? VIOLET+'44' : BORDER}`,
+                        }}
+                        title="Click to toggle between Direct and Fund-of-Funds">
+                        {isFoF ? 'Fund-of-Funds ✓' : 'Direct — click to set as FoF'}
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
