@@ -222,6 +222,157 @@ export const EditableText = ({ value, onCommit, placeholder, className, style, t
   );
 };
 
+/* Click-to-edit number. Like EditableText but parses on commit and can render
+   the committed value through a custom formatter (currency / percent / raw).
+   Enter/blur saves; Escape cancels. */
+export const EditableNumber = ({
+  value,
+  onCommit,
+  format = (v) => (v == null || Number.isNaN(v) ? '–' : String(v)),
+  step,
+  placeholder,
+  align = 'right',
+  className,
+  style,
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value == null ? '' : String(value));
+  useEffect(() => {
+    if (!editing) setDraft(value == null ? '' : String(value));
+  }, [value, editing]);
+
+  const commit = () => {
+    setEditing(false);
+    const trimmed = String(draft).trim();
+    if (trimmed === '') {
+      if (value != null) onCommit?.(null);
+      return;
+    }
+    const n = parseNum(trimmed);
+    if (n == null) return;
+    if (n !== value) onCommit?.(n);
+  };
+  const cancel = () => {
+    setDraft(value == null ? '' : String(value));
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        inputMode="decimal"
+        step={step}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); commit(); }
+          if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        }}
+        onFocus={(e) => e.currentTarget.select()}
+        className={className}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          borderBottom: `2px solid ${ACCENT}`,
+          outline: 'none',
+          padding: 0,
+          color: TEXT,
+          width: '100%',
+          textAlign: align,
+          font: 'inherit',
+          ...style,
+        }}
+        placeholder={placeholder}
+      />
+    );
+  }
+  const display = value == null ? (placeholder || '–') : format(value);
+  const isPlaceholder = value == null;
+  return (
+    <span
+      onClick={() => setEditing(true)}
+      className={className}
+      style={{
+        cursor: 'text',
+        borderBottom: `1px dashed transparent`,
+        display: 'inline-block',
+        minWidth: 10,
+        textAlign: align,
+        color: isPlaceholder ? TEXT_MUTE : (style && style.color) || undefined,
+        fontStyle: isPlaceholder ? 'italic' : undefined,
+        ...style,
+      }}
+      title="Click to edit"
+      onMouseEnter={(e) => { e.currentTarget.style.borderBottomColor = BORDER; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderBottomColor = 'transparent'; }}
+    >
+      {display}
+    </span>
+  );
+};
+
+/* Click-to-edit dropdown. Options is [{value, label}]. Commits on change. */
+export const EditableSelect = ({
+  value,
+  onCommit,
+  options = [],
+  placeholder = '—',
+  className,
+  style,
+  renderValue,
+}) => {
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return (
+      <select
+        autoFocus
+        value={value ?? ''}
+        onChange={(e) => { const v = e.target.value; setEditing(false); if (v !== value) onCommit?.(v); }}
+        onBlur={() => setEditing(false)}
+        onKeyDown={(e) => { if (e.key === 'Escape') setEditing(false); }}
+        className={className}
+        style={{
+          background: PANEL_2,
+          border: `1px solid ${ACCENT}`,
+          color: TEXT,
+          font: 'inherit',
+          padding: '1px 4px',
+          borderRadius: 3,
+          outline: 'none',
+          ...style,
+        }}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+    );
+  }
+
+  const current = options.find((o) => o.value === value);
+  const display = renderValue ? renderValue(current?.value) : (current?.label || placeholder);
+  return (
+    <span
+      onClick={() => setEditing(true)}
+      className={className}
+      style={{
+        cursor: 'pointer',
+        borderBottom: `1px dashed transparent`,
+        ...style,
+      }}
+      title="Click to edit"
+      onMouseEnter={(e) => { e.currentTarget.style.borderBottomColor = BORDER; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderBottomColor = 'transparent'; }}
+    >
+      {display}
+    </span>
+  );
+};
+
 /* Token logo. Tries three sources in order:
      1. CryptoRank image map (from TokenImageContext) — high-quality, matches
         CoinGecko / CoinMarketCap-style logos.

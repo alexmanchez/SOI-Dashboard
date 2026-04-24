@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import _ from 'lodash';
 import {
-  ArrowLeft, Edit2, X, Check, Plus, Trash2, RefreshCw,
+  ArrowLeft, X, Check, Plus, Trash2, RefreshCw,
   Calendar, ChevronDown, ChevronRight,
 } from 'lucide-react';
 
@@ -18,7 +18,8 @@ import {
 import { OpenTokenDetailContext } from '../contexts';
 
 import {
-  Panel, Pill, EditableText, SectorBadge, LiquidityBadge, ChangeCell, SortHead,
+  Panel, Pill, EditableText, EditableNumber, EditableSelect,
+  SectorBadge, LiquidityBadge, ChangeCell, SortHead,
   ManagerSocials, KPI, NumField, Stat,
 } from '../components/ui';
 import { TokenIcon } from '../components/TokenIcon';
@@ -106,6 +107,21 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
               delete copy.forceLiquid;
               return copy;
             }),
+          }
+        ),
+      }),
+    }));
+  };
+
+  const updatePositionField = (posId, field, value) => {
+    updateStore(s => ({
+      ...s,
+      soIs: s.soIs.map(x => x.id !== soiId ? x : {
+        ...x,
+        snapshots: snapshotsOf(x).map(snap =>
+          snap.id !== selectedSnapId ? snap : {
+            ...snap,
+            positions: snap.positions.map(p => p.id !== posId ? p : { ...p, [field]: value }),
           }
         ),
       }),
@@ -385,29 +401,74 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
                 return (
                   <tr key={p.id} style={{borderBottom: `1px solid ${BORDER}`}}>
                     <td className="px-3 py-2.5">
-                      <div className="font-medium">{p.positionName}</div>
+                      <EditableText
+                        value={p.positionName}
+                        onCommit={(v) => updatePositionField(p.id, 'positionName', v)}
+                        className="font-medium"
+                        placeholder="Position name"
+                      />
                       <div className="text-[10px]" style={{color:TEXT_MUTE}}>
-                        {p.ticker && <span>{p.ticker}</span>}
+                        <EditableText
+                          value={p.ticker || ''}
+                          onCommit={(v) => updatePositionField(p.id, 'ticker', v.toUpperCase())}
+                          placeholder="ticker"
+                        />
                         {p.assetType && <span> • {p.assetType}</span>}
-                        {p.acquisitionDate && <span> • Acq {String(p.acquisitionDate).slice(0,10)}</span>}
+                        {' • '}
+                        <EditableText
+                          value={p.acquisitionDate ? String(p.acquisitionDate).slice(0,10) : ''}
+                          onCommit={(v) => updatePositionField(p.id, 'acquisitionDate', v)}
+                          placeholder="YYYY-MM-DD"
+                        />
                       </div>
                       {p.notes && <div className="text-[10px] mt-0.5" style={{color:TEXT_DIM}}>{p.notes}</div>}
                     </td>
-                    <td className="px-3 py-2.5"><SectorBadge sectorId={p.sectorId} /></td>
+                    <td className="px-3 py-2.5">
+                      <EditableSelect
+                        value={p.sectorId || 'unclassified'}
+                        onCommit={(v) => updatePositionField(p.id, 'sectorId', v)}
+                        options={[
+                          ...getSectors().map(s => ({ value: s.id, label: s.label })),
+                          { value: 'unclassified', label: 'Unclassified' },
+                        ]}
+                        renderValue={(v) => <SectorBadge sectorId={v} />}
+                      />
+                    </td>
                     <td className="px-3 py-2.5 text-right tabular-nums" style={{color: p.quantity ? TEXT : TEXT_MUTE}}>
-                      {p.quantity ? p.quantity.toLocaleString(undefined,{maximumFractionDigits: 2}) : '—'}
+                      <EditableNumber
+                        value={p.quantity ?? null}
+                        onCommit={(v) => updatePositionField(p.id, 'quantity', v)}
+                        format={(v) => (v ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—')}
+                        placeholder="—"
+                      />
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums" style={{color:TEXT_DIM}}>
-                      {p.soiPrice ? `$${p.soiPrice.toLocaleString(undefined,{maximumFractionDigits: 4})}` : '—'}
+                      <EditableNumber
+                        value={p.soiPrice ?? null}
+                        onCommit={(v) => updatePositionField(p.id, 'soiPrice', v)}
+                        format={(v) => (v ? '$' + v.toLocaleString(undefined, { maximumFractionDigits: 4 }) : '—')}
+                        placeholder="—"
+                      />
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">
                       {p.livePrice ? <span style={{color:GREEN}}>${p.livePrice.toLocaleString(undefined,{maximumFractionDigits: 4})}</span> : <span style={{color:TEXT_MUTE}}>—</span>}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums"><ChangeCell value={p.change24h} /></td>
                     <td className="px-3 py-2.5 text-right tabular-nums" style={{color:TEXT_DIM}}>
-                      {p.costBasis != null ? fmtCurrency(p.costBasis) : '—'}
+                      <EditableNumber
+                        value={p.costBasis ?? null}
+                        onCommit={(v) => updatePositionField(p.id, 'costBasis', v)}
+                        format={(v) => (v != null ? fmtCurrency(v) : '—')}
+                        placeholder="—"
+                      />
                     </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums font-medium">{fmtCurrency(p.currentValue)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-medium">
+                      <EditableNumber
+                        value={p.soiMarketValue ?? null}
+                        onCommit={(v) => updatePositionField(p.id, 'soiMarketValue', v)}
+                        format={(v) => fmtCurrency(v)}
+                      />
+                    </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">
                       {plDollars != null ? <ChangeCell value={plDollars} format="currency" /> : <span style={{color:TEXT_MUTE}}>—</span>}
                     </td>
@@ -433,16 +494,10 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
                       </button>
                     </td>
                     <td className="px-3 py-2.5 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button onClick={()=>setEditingPosition({mode:'edit', position: p})}
-                          className="p-1 rounded" style={{color:TEXT_DIM}} title="Edit">
-                          <Edit2 size={12} />
-                        </button>
-                        <button onClick={()=>deletePosition(p.id)}
-                          className="p-1 rounded" style={{color:TEXT_DIM}} title="Delete">
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
+                      <button onClick={()=>deletePosition(p.id)}
+                        className="p-1 rounded" style={{color:TEXT_DIM}} title="Delete">
+                        <Trash2 size={12} />
+                      </button>
                     </td>
                   </tr>
                 );
