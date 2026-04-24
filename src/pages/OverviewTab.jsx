@@ -72,16 +72,50 @@ export function OverviewTab({ rollup, store, selection, priceHistory, historyLoa
           Look-through from {rollup.fofLookThroughCount} fund-of-fund{rollup.fofLookThroughCount===1?'':'s'} applied — positions reflect underlying exposure
         </div>
       )}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KPI label="Total Exposure" value={fmtCurrency(rollup.totalNAV)}
-             sub={`${rollup.positionCount} positions in ${rollup.soiCount} fund${rollup.soiCount===1?'':'s'}`} />
-        <KPI label="Managers" value={rollup.managerCount}
-             sub={`${rollup.soiCount} vintage${rollup.soiCount===1?'':'s'}`} />
-        <KPI label="Liquid / Illiquid" value={fmtPct(rollup.liquidPct, 1)}
-             sub={`${fmtCurrency(rollup.liquidNAV)} liquid • ${fmtCurrency(rollup.illiquidNAV)} illiquid`} />
-        <KPI label="Top-10 concentration" value={fmtPct(rollup.top10, 1)}
-             sub={`Top-25: ${fmtPct(rollup.top25, 1)}`} />
-      </div>
+
+      {/* Client view: fund-economics row prominent on top */}
+      {selection?.kind === 'client' && clientEconomics && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KPI label="Committed"
+               value={fmtCurrency(clientEconomics.totalCommitted)}
+               sub={`Across ${rollup.soiCount} fund${rollup.soiCount===1?'':'s'}`} />
+          <KPI label="Called"
+               value={fmtCurrency(clientEconomics.totalCalled)}
+               sub={clientEconomics.pctInvested != null ? `${fmtPct(clientEconomics.pctInvested, 1)} of committed` : null} />
+          <KPI label="% Invested"
+               value={clientEconomics.pctInvested != null ? fmtPct(clientEconomics.pctInvested, 1) : '—'} />
+          <KPI label="Pooled MOIC"
+               value={fmtMoic(clientEconomics.pooledMoic)}
+               tone={clientEconomics.pooledMoic != null && clientEconomics.pooledMoic >= 1 ? 'up' : 'down'}
+               sub={`NAV / Called`} />
+        </div>
+      )}
+
+      {/* Manager view: AUM-style headline — firm NAV, vintage count, position count, top sector.
+          Skips the committed/MOIC row (not meaningful without a client). */}
+      {selection?.kind === 'manager' ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KPI label="Firm NAV" value={fmtCurrency(rollup.totalNAV)} />
+          <KPI label="Vintages" value={rollup.soiCount}
+               sub={`${rollup.positionCount} positions`} />
+          <KPI label="Top sector"
+               value={rollup.sectorBreakdown[0]?.label || '—'}
+               sub={rollup.sectorBreakdown[0] ? fmtPct(rollup.sectorBreakdown[0].pct, 1) : null} />
+          <KPI label="Liquid" value={fmtPct(rollup.liquidPct, 1)}
+               sub={`${fmtCurrency(rollup.liquidNAV)} liquid • ${fmtCurrency(rollup.illiquidNAV)} illiquid`} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KPI label="Total Exposure" value={fmtCurrency(rollup.totalNAV)}
+               sub={`${rollup.positionCount} positions in ${rollup.soiCount} fund${rollup.soiCount===1?'':'s'}`} />
+          <KPI label="Managers" value={rollup.managerCount}
+               sub={`${rollup.soiCount} vintage${rollup.soiCount===1?'':'s'}`} />
+          <KPI label="Liquid / Illiquid" value={fmtPct(rollup.liquidPct, 1)}
+               sub={`${fmtCurrency(rollup.liquidNAV)} liquid • ${fmtCurrency(rollup.illiquidNAV)} illiquid`} />
+          <KPI label="Top-10 concentration" value={fmtPct(rollup.top10, 1)}
+               sub={`Top-25: ${fmtPct(rollup.top25, 1)}`} />
+        </div>
+      )}
 
       {/* Compact exposure + top-holdings + top-movers row — the main at-a-glance view. */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
