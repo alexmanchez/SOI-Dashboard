@@ -75,12 +75,21 @@ export default function App() {
     if (loaded && (loaded.soIs.length || loaded.clients.length)) return loaded;
     return seedStore();
   });
-  // Sync lib/sectors module-level ref to the live store list before any child render / useMemo.
-  // If stored sectors lack the v5 'base-layer' bucket (e.g. HMR preserved an
-  // older store in memory), force-use DEFAULT_SECTORS so breakdown labels and
+  // Sync lib/sectors module-level ref to the live store list. If stored
+  // sectors lack the v5 'base-layer' bucket (e.g. HMR preserved an older
+  // store in memory), force-use DEFAULT_SECTORS so breakdown labels and
   // colors reflect the current taxonomy regardless of persisted state.
-  const _storedSectorsValid = store.sectors && store.sectors.length && store.sectors.some(sec => sec && sec.id === 'base-layer');
-  setSectors(_storedSectorsValid ? store.sectors : DEFAULT_SECTORS);
+  //
+  // The effect keys on store.sectors and only mutates the module-local ref,
+  // so it does not cause a re-render loop. Children read sectors via
+  // getSectors()/sectorOf(); on first render after a mutation they see the
+  // new ref because useEffect runs synchronously after commit.
+  useEffect(() => {
+    const valid =
+      store.sectors && store.sectors.length &&
+      store.sectors.some((sec) => sec && sec.id === 'base-layer');
+    setSectors(valid ? store.sectors : DEFAULT_SECTORS);
+  }, [store.sectors]);
   useEffect(() => { saveStore(store); }, [store]);
 
   // Top-level navigation: selection + tab
