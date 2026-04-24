@@ -1,5 +1,5 @@
 import {
-  useState,
+  useMemo, useState,
 } from 'react';
 import _ from 'lodash';
 import {
@@ -17,7 +17,7 @@ import {
   rangeToStartMs,
 } from '../lib/ranges';
 import {
-  latestSnapshot, isLiquid,
+  latestSnapshot, isLiquid, distinctSnapshotDates, earliestSnapshotDate,
 } from '../lib/snapshots';
 import {
   buildNAVSeriesSimple,
@@ -26,11 +26,13 @@ import { Panel } from '../components/ui';
 import {
   MiniSparkline,
 } from '../components/MiniSparkline';
+import { TimeSlider } from '../components/TimeSlider';
+import { AsOfPill } from '../components/AsOfPill';
 
 // Wrapping Date.now so react-hooks/purity doesn't flag the refresh below.
 const nowFn = () => Date.now();
 
-export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clientShareMode, scaleBy: _scaleBy }) {
+export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clientShareMode, scaleBy: _scaleBy, asOfDate, setAsOfDate }) {
   // Stable "now" for sparklines; refresh via setState-during-render when
   // the user changes the range pill.
   const [nowMs, setNowMs] = useState(nowFn);
@@ -39,10 +41,88 @@ export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKe
     _setPrevRange(range);
     setNowMs(nowFn());
   }
+
+  const snapshotDates = useMemo(() => distinctSnapshotDates(rollup.soIs), [rollup.soIs]);
+
+  /* Merge the rollup's manager breakdown (which only includes SOIs that have
+     positions at asOfDate) with the full scoped SOI list, so "not yet funded"
+     managers still appear as grayed cards. */
+  const breakdownBySoi = useMemo(() => {
+    const m = {};
+    for (const r of rollup.managerBreakdown || []) m[r.soiId] = r;
+    return m;
+  }, [rollup.managerBreakdown]);
+
+  const cards = useMemo(() => (rollup.soIs || []).map((soi) => {
+    const rollupRow = breakdownBySoi[soi.id];
+    if (rollupRow) return { ...rollupRow, soi, notYetFunded: false };
+    // Synthetic "not yet funded" row.
+    const mgr = store.managers.find((mg) => mg.id === soi.managerId);
+    return {
+      soi,
+      soiId: soi.id,
+      managerId: soi.managerId,
+      managerName: mgr?.name || 'Unknown',
+      vintage: soi.vintage,
+      value: 0,
+      pct: 0,
+      positionCount: 0,
+      asOfDate: null,
+      _scale: 1,
+      notYetFunded: true,
+    };
+  }).sort((a, b) => (b.value || 0) - (a.value || 0)), [rollup.soIs, breakdownBySoi, store.managers]);
+
   return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 flex-wrap">
+        <AsOfPill dates={(rollup.managerBreakdown || []).map((r) => r.asOfDate)} />
+      </div>
+      {snapshotDates.length > 1 && (
+        <TimeSlider
+          dates={snapshotDates}
+          value={asOfDate}
+          onChange={setAsOfDate}
+        />
+      )}
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      {rollup.managerBreakdown.map(m => {
-        const soi = store.soIs.find(s => s.id === m.soiId);
+      {cards.map(m => {
+        if (m.notYetFunded) {
+          const earliest = earliestSnapshotDate(m.soi);
+          const mgr = store.managers.find((mg) => mg.id === m.managerId);
+          return (
+            <Panel
+              key={m.soiId}
+              className="p-5 transition-colors"
+              style={{ borderColor: BORDER, opacity: 0.45 }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1">
+                  <div className="text-base font-semibold flex items-center gap-2">
+                    {m.managerName}
+                    {mgr?.type === 'fund_of_funds' && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                        style={{ backgroundColor: VIOLET + '22', color: VIOLET, border: `1px solid ${VIOLET}44` }}>FoF</span>
+                    )}
+                  </div>
+                  <div className="text-xs" style={{ color: TEXT_DIM }}>{m.vintage}</div>
+                </div>
+                <div
+                  className="text-[11px] font-medium px-2 py-0.5 rounded self-start"
+                  style={{
+                    backgroundColor: TEXT_MUTE + '22',
+                    color: TEXT_MUTE,
+                    border: `1px solid ${TEXT_MUTE}55`,
+                  }}
+                  title={earliest ? `First snapshot on ${earliest}` : 'No snapshots yet'}
+                >
+                  Not yet funded
+                </div>
+              </div>
+            </Panel>
+          );
+        }
+        const soi = m.soi;
         const mgr = store.managers.find(mg => mg.id === m.managerId);
         const positions = (latestSnapshot(soi)?.positions || []).map(p => {
           const sectorId = resolveSector(p, store.sectorOverrides);
@@ -131,6 +211,7 @@ export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKe
           </Panel>
         );
       })}
+    </div>
     </div>
   );
 }

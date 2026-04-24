@@ -24,7 +24,7 @@ import { Panel, Pill } from './ui';
 // time on range change for the chart's right-edge).
 const nowFn = () => Date.now();
 
-export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, height=260, compact=false, title }) {
+export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, asOfDate, height=260, compact=false, title }) {
   const tokenIds = useMemo(() => {
     const ids = new Set();
     for (const b of soiBundles) for (const snap of snapshotsOf(b)) for (const p of (snap.positions||[])) if (isLiquid(p)&&p.cgTokenId) ids.add(p.cgTokenId);
@@ -191,6 +191,19 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
                 <ReferenceLine key={i} x={ms} stroke={GOLD} strokeWidth={1} strokeDasharray="3 3"
                   label={{ value: new Date(ms).toLocaleDateString([],{month:'short',year:'2-digit'}), position:'top', fill:GOLD, fontSize:9 }} />
               ))}
+              {/* Time-travel slider's selected-date vertical line. */}
+              {asOfDate && series.length > 0 && (() => {
+                const travelMs = new Date(asOfDate + 'T00:00:00Z').getTime();
+                if (travelMs < series[0].date || travelMs > series[series.length - 1].date) return null;
+                return (
+                  <ReferenceLine
+                    x={travelMs}
+                    stroke={GOLD}
+                    strokeWidth={2}
+                    label={{ value: 'Viewing', position: 'insideTopRight', fill: GOLD, fontSize: 10 }}
+                  />
+                );
+              })()}
             </AreaChart>
           </ResponsiveContainer>
         </div>

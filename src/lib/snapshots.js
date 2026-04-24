@@ -34,6 +34,25 @@ export const snapshotAsOf = (soi, dateStr) => {
   return best || latestSnapshot(soi);
 };
 
+/* Distinct snapshot dates across a list of SOIs, sorted ascending. */
+export const distinctSnapshotDates = (soIs) => {
+  const set = new Set();
+  for (const soi of soIs || []) {
+    for (const snap of snapshotsOf(soi)) {
+      if (snap.asOfDate) set.add(snap.asOfDate);
+    }
+  }
+  return [...set].sort();
+};
+
+/* Earliest snapshot date across this SOI (or null). Used to decide when a
+   manager "didn't yet exist" at a given time-travel slider position. */
+export const earliestSnapshotDate = (soi) => {
+  const snaps = sortedSnapshots(soi);
+  const first = snaps.find((s) => s.asOfDate);
+  return first ? first.asOfDate : null;
+};
+
 // Tri-state liquidity check: override > forceLiquid bool > asset type > default.
 export const isLiquid = (position) => {
   if (position.liquidityOverride === 'liquid') return true;

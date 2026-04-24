@@ -416,6 +416,7 @@ export default function App() {
                 priceHistory={priceHistory} historyLoading={historyLoading} historyProgress={historyProgress}
                 range={range} onRangeChange={setRange} onRequestFetch={fetchHistoryFor}
                 apiKey={effectiveApiKey} updateStore={updateStore}
+                asOfDate={asOfDate} setAsOfDate={setAsOfDate}
                 clientShareMode={clientShareMode} scaleBy={scaleBy} />
             )}
             {subPage === 'positions' && (
@@ -490,6 +491,7 @@ export default function App() {
             {rollup.positionCount > 0 && (
               <ManagersTab rollup={rollup} store={store} onDrill={(soiId) => setDrilldownSoi(soiId)}
                 priceHistory={priceHistory} range={range} apiKey={effectiveApiKey}
+                asOfDate={asOfDate} setAsOfDate={setAsOfDate}
                 clientShareMode={clientShareMode} scaleBy={scaleBy} />
             )}
           </div>
