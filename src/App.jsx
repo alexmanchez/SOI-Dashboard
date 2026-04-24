@@ -4,13 +4,13 @@ import {
 import catenaLogo from './assets/catena-logo.png';
 import _ from 'lodash';
 import {
-  Upload, RefreshCw, AlertCircle, Layers, Search, Plus, Settings, Users, Briefcase, ChevronRight, Calendar, Home, DollarSign,
+  Settings, DollarSign,
 } from 'lucide-react';
 import {
-  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, RED,
+  BG, PANEL, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
 } from './lib/theme';
 import {
-  fmtCurrency, fundLabel,
+  fundLabel,
 } from './lib/format';
 import {
   DEFAULT_SECTORS, setSectors,
@@ -22,6 +22,7 @@ import { seedStore } from './lib/seed';
 import {
   latestSnapshot,
 } from './lib/snapshots';
+import { computeSearchResults } from './lib/search';
 import {
   computeRollup,
 } from './lib/rollup';
@@ -39,17 +40,18 @@ import {
 } from './contexts';
 
 import {
-  Panel, NavButton, Breadcrumb, EditableText, PlaceholderPage,
+  PlaceholderPage,
 } from './components/ui';
-import {
-  TokenIcon,
-} from './components/TokenIcon';
 import {
   TokenDetailDrawer,
 } from './components/TokenDetailDrawer';
 import {
   LeftSidebar,
 } from './components/LeftSidebar';
+import { TopNav } from './components/TopNav';
+import { SearchBox } from './components/SearchBox';
+import { ContextRow } from './components/ContextRow';
+import { ScopeHeader } from './components/ScopeHeader';
 
 import {
   OverviewTab,
@@ -141,38 +143,7 @@ export default function App() {
   }, []);
   const tokenImagesCtx = useMemo(() => ({ crMap, cmcIdMap }), [crMap, cmcIdMap]);
 
-  /* Compute grouped search results across portfolios / managers / positions.
-     Null when query is empty, signaling "don't render the dropdown." */
-  const searchResults = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return null;
-    const clients = store.clients
-      .filter(c => (c.name || '').toLowerCase().includes(q))
-      .slice(0, 6);
-    const managers = store.managers
-      .filter(m => (m.name || '').toLowerCase().includes(q) || (m.firm || '').toLowerCase().includes(q))
-      .slice(0, 6);
-    const byToken = {};
-    for (const soi of store.soIs) {
-      const snap = latestSnapshot(soi);
-      if (!snap) continue;
-      const mgr = store.managers.find(m => m.id === soi.managerId);
-      for (const p of (snap.positions || [])) {
-        const name = (p.positionName || '').toLowerCase();
-        const ticker = (p.ticker || '').toLowerCase();
-        if (!(name.includes(q) || ticker.includes(q))) continue;
-        const key = (p.ticker || p.positionName || '').toUpperCase();
-        if (!byToken[key]) {
-          byToken[key] = { key, ticker: p.ticker || '', name: p.positionName || '',
-                           cgTokenId: p.cgTokenId || null, exposures: [] };
-        }
-        if (!byToken[key].cgTokenId && p.cgTokenId) byToken[key].cgTokenId = p.cgTokenId;
-        byToken[key].exposures.push({ position: p, soi, manager: mgr });
-      }
-    }
-    const positions = Object.values(byToken).slice(0, 8);
-    return { clients, managers, positions };
-  }, [searchQuery, store]);
+  const searchResults = useMemo(() => computeSearchResults(searchQuery, store), [searchQuery, store]);
   const [drilldownSoi, setDrilldownSoi] = useState(null); // when viewing a single SOI in depth
 
   // Fund Economics is client-scoped. Snap it back to 'dashboard' if the user
@@ -330,305 +301,43 @@ export default function App() {
             </div>
           </div>
 
-          {/* Primary nav */}
-          <div className="flex items-center gap-1 ml-6">
-            <NavButton active={tab==='overview' && selection.kind==='firm'} onClick={()=>{setSelection({kind:'firm'}); setTab('overview'); setDrilldownSoi(null); setOpenMenu(null); setSubPage('dashboard');}} icon={Home}>Home</NavButton>
-
-            {/* Portfolios: opens a dropdown listing clients */}
-            <div style={{ position: 'relative' }}>
-              <NavButton
-                active={tab==='positions' || openMenu==='portfolios'}
-                onClick={() => setOpenMenu(openMenu==='portfolios' ? null : 'portfolios')}
-                icon={Layers}
-                hasCaret>Portfolios</NavButton>
-              {openMenu === 'portfolios' && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 42 }}>
-                  <div className="rounded shadow-xl py-1"
-                    style={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, minWidth: 220 }}>
-                    <button onClick={() => { setOpenMenu(null); setSelection({kind:'firm'}); setTab('overview'); setDrilldownSoi(null); }}
-                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                      style={{ color: TEXT }}>
-                      <Users size={13} style={{ color: ACCENT_2 }} />
-                      <span>All portfolios</span>
-                    </button>
-                    <div style={{ height: 1, backgroundColor: BORDER, margin: '4px 0' }} />
-                    {store.clients.length === 0 && (
-                      <div className="px-3 py-2 text-xs" style={{ color: TEXT_MUTE }}>No portfolios yet.</div>
-                    )}
-                    {store.clients.map(c => (
-                      <button key={c.id}
-                        onClick={() => { setOpenMenu(null); setSelection({kind:'client', id:c.id}); setTab('overview'); setDrilldownSoi(null); }}
-                        className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                        style={{ color: TEXT }}>
-                        <span style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: ACCENT_2, flexShrink: 0 }} />
-                        <span className="truncate">{c.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Managers: cascading dropdown — managers → vintages → (FoF only) underlying commitments */}
-            <div style={{ position: 'relative' }}>
-              <NavButton
-                active={tab==='managers' || openMenu==='managers'}
-                onClick={() => { setOpenMenu(openMenu==='managers' ? null : 'managers'); setFlyoutManagerId(null); setFlyoutSoiId(null); }}
-                icon={Briefcase}
-                hasCaret>Managers</NavButton>
-              {openMenu === 'managers' && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 42 }}>
-                  <div className="rounded shadow-xl py-1"
-                    style={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, minWidth: 260 }}>
-                    <button onClick={() => { setOpenMenu(null); setFlyoutManagerId(null); setFlyoutSoiId(null); setTab('managers'); setDrilldownSoi(null); }}
-                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                      style={{ color: TEXT }}>
-                      <Briefcase size={13} style={{ color: ACCENT_2 }} />
-                      <span>All managers</span>
-                    </button>
-                    <div style={{ height: 1, backgroundColor: BORDER, margin: '4px 0' }} />
-                    {store.managers.length === 0 && (
-                      <div className="px-3 py-2 text-xs" style={{ color: TEXT_MUTE }}>No managers yet.</div>
-                    )}
-                    {store.managers.map(m => {
-                      const mSois = store.soIs.filter(x => x.managerId === m.id);
-                      const isFoF = m.type === 'fund_of_funds';
-                      const isMOpen = flyoutManagerId === m.id;
-                      return (
-                        <div key={m.id} style={{ position: 'relative' }}>
-                          <button onClick={() => {
-                            // Clicking the manager name navigates to the manager's
-                            // overview AND opens the vintage flyout so the user can
-                            // optionally drill further.
-                            setSelection({ kind: 'manager', id: m.id });
-                            setTab('managers');
-                            setDrilldownSoi(null);
-                            setSubPage('dashboard');
-                            if (mSois.length > 0) {
-                              setFlyoutManagerId(isMOpen ? null : m.id);
-                              setFlyoutSoiId(null);
-                            } else {
-                              setOpenMenu(null); setFlyoutManagerId(null); setFlyoutSoiId(null);
-                            }
-                          }}
-                            className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                            style={{ color: TEXT, backgroundColor: isMOpen ? BORDER + '66' : 'transparent' }}>
-                            <span style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: ACCENT_2, flexShrink: 0 }} />
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate flex items-center gap-1.5">
-                                <span className="truncate">{m.name}</span>
-                                {isFoF && <span className="text-[9px] px-1 rounded flex-shrink-0" style={{ backgroundColor: ACCENT_2 + '22', color: ACCENT_2 }}>FoF</span>}
-                              </div>
-                              <div className="text-[10px] truncate" style={{ color: TEXT_MUTE }}>
-                                {mSois.length} {mSois.length === 1 ? 'vintage' : 'vintages'}
-                              </div>
-                            </div>
-                            {mSois.length > 0 && <ChevronRight size={12} style={{ color: TEXT_MUTE, flexShrink: 0 }} />}
-                          </button>
-
-                          {/* Level 2: this manager's vintages */}
-                          {isMOpen && (
-                            <div style={{ position: 'absolute', top: 0, left: '100%', marginLeft: 4 }}>
-                              <div className="rounded shadow-xl py-1"
-                                style={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, minWidth: 260 }}>
-                                <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>
-                                  {m.name} · funds
-                                </div>
-                                {mSois.map(soi => {
-                                  const snap = latestSnapshot(soi);
-                                  const subs = (snap?.subCommitments || []);
-                                  const hasSubs = isFoF && subs.length > 0;
-                                  const isVOpen = flyoutSoiId === soi.id;
-                                  return (
-                                    <div key={soi.id} style={{ position: 'relative' }}>
-                                      <button onClick={() => {
-                                        if (hasSubs) {
-                                          setFlyoutSoiId(isVOpen ? null : soi.id);
-                                        } else {
-                                          setOpenMenu(null); setFlyoutManagerId(null); setFlyoutSoiId(null);
-                                          setTab('managers'); setDrilldownSoi(soi.id);
-                                        }
-                                      }}
-                                        className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                                        style={{ color: TEXT, backgroundColor: isVOpen ? BORDER + '66' : 'transparent' }}>
-                                        <Layers size={13} style={{ color: ACCENT_2, flexShrink: 0 }} />
-                                        <div className="min-w-0 flex-1">
-                                          <div className="truncate">{soi.fundName || soi.vintage}</div>
-                                          <div className="text-[10px] truncate" style={{ color: TEXT_MUTE }}>
-                                            {snap?.asOfDate ? `as of ${snap.asOfDate}` : 'no snapshot'}
-                                            {hasSubs && ` · ${subs.length} underlying`}
-                                          </div>
-                                        </div>
-                                        {hasSubs && <ChevronRight size={12} style={{ color: TEXT_MUTE, flexShrink: 0 }} />}
-                                      </button>
-
-                                      {/* Level 3: underlying FoF commitments (only for FoF vintages with sub-commitments) */}
-                                      {isVOpen && hasSubs && (
-                                        <div style={{ position: 'absolute', top: 0, left: '100%', marginLeft: 4 }}>
-                                          <div className="rounded shadow-xl py-1"
-                                            style={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, minWidth: 280 }}>
-                                            <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>
-                                              {fundLabel(soi)} · underlying
-                                            </div>
-                                            {subs.map((sub, i) => {
-                                              const subSoi = store.soIs.find(x => x.id === sub.toSoiId);
-                                              const subMgr = subSoi ? store.managers.find(mm => mm.id === subSoi.managerId) : null;
-                                              return (
-                                                <button key={sub.toSoiId || i}
-                                                  onClick={() => {
-                                                    if (!subSoi) return;
-                                                    setOpenMenu(null); setFlyoutManagerId(null); setFlyoutSoiId(null);
-                                                    setTab('managers'); setDrilldownSoi(subSoi.id);
-                                                  }}
-                                                  disabled={!subSoi}
-                                                  className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                                                  style={{ color: subSoi ? TEXT : TEXT_MUTE, opacity: subSoi ? 1 : 0.5 }}>
-                                                  <span style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: ACCENT_2, flexShrink: 0 }} />
-                                                  <div className="min-w-0 flex-1">
-                                                    <div className="truncate">{subMgr?.name || '(missing manager)'} — {fundLabel(subSoi)}</div>
-                                                    <div className="text-[10px] truncate" style={{ color: TEXT_MUTE }}>
-                                                      {fmtCurrency(sub.committed || 0)} committed
-                                                    </div>
-                                                  </div>
-                                                </button>
-                                              );
-                                            })}
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Create: opens a dropdown with create options */}
-            <div style={{ position: 'relative' }}>
-              <button onClick={() => setOpenMenu(openMenu==='create' ? null : 'create')}
-                className="ml-2 px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5"
-                style={{ backgroundColor: ACCENT, color: BG }}>
-                <Plus size={12} /> Create
-              </button>
-              {openMenu === 'create' && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 42 }}>
-                  <div className="rounded shadow-xl py-1"
-                    style={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, minWidth: 220 }}>
-                    <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>New</div>
-                    <button onClick={() => { setOpenMenu(null); setSettingsOpen(true); }}
-                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                      style={{ color: TEXT }}>
-                      <Users size={13} style={{ color: ACCENT_2 }} /> Portfolio (client)
-                    </button>
-                    <button onClick={() => { setOpenMenu(null); setSettingsOpen(true); }}
-                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                      style={{ color: TEXT }}>
-                      <Briefcase size={13} style={{ color: ACCENT_2 }} /> Manager
-                    </button>
-                    <button onClick={() => { setOpenMenu(null); setImportOpen(true); }}
-                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                      style={{ color: TEXT }}>
-                      <Upload size={13} style={{ color: ACCENT_2 }} /> Holdings snapshot (import)
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <TopNav
+            store={store}
+            selection={selection}
+            tab={tab}
+            openMenu={openMenu}
+            flyoutManagerId={flyoutManagerId}
+            flyoutSoiId={flyoutSoiId}
+            setSelection={setSelection}
+            setTab={setTab}
+            setDrilldownSoi={setDrilldownSoi}
+            setSubPage={setSubPage}
+            setOpenMenu={setOpenMenu}
+            setFlyoutManagerId={setFlyoutManagerId}
+            setFlyoutSoiId={setFlyoutSoiId}
+            onCreatePortfolio={() => setSettingsOpen(true)}
+            onCreateManager={() => setSettingsOpen(true)}
+            onImport={() => setImportOpen(true)}
+          />
 
           <div className="flex-1" />
 
-          {/* Search */}
-          <div style={{ position: 'relative' }}>
-            <Search size={12} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: TEXT_MUTE, pointerEvents: 'none' }} />
-            <input type="search" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
-              placeholder="Search portfolios, managers, positions…"
-              className="pl-7 pr-3 py-1.5 rounded text-xs outline-none"
-              style={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, color: TEXT, width: 260 }}
-            />
-            {searchResults && (
-              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 43, width: 360 }}>
-                <div className="rounded shadow-xl py-1"
-                  style={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, maxHeight: 460, overflowY: 'auto' }}>
-                  {searchResults.clients.length === 0
-                   && searchResults.managers.length === 0
-                   && searchResults.positions.length === 0 && (
-                    <div className="px-3 py-3 text-xs" style={{ color: TEXT_MUTE }}>No matches.</div>
-                  )}
-                  {searchResults.clients.length > 0 && (
-                    <>
-                      <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Portfolios</div>
-                      {searchResults.clients.map(c => (
-                        <button key={c.id}
-                          onClick={() => { setSearchQuery(''); setSelection({kind:'client', id:c.id}); setTab('overview'); setDrilldownSoi(null); setOpenMenu(null); }}
-                          className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                          style={{ color: TEXT }}>
-                          <Users size={13} style={{ color: ACCENT_2 }} />
-                          <span className="truncate">{c.name}</span>
-                        </button>
-                      ))}
-                    </>
-                  )}
-                  {searchResults.managers.length > 0 && (
-                    <>
-                      <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Managers</div>
-                      {searchResults.managers.map(m => {
-                        const mSois = store.soIs.filter(x => x.managerId === m.id);
-                        return (
-                          <button key={m.id}
-                            onClick={() => { setSearchQuery(''); setTab('managers'); setDrilldownSoi(mSois[0]?.id || null); setOpenMenu(null); }}
-                            className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                            style={{ color: TEXT }}>
-                            <Briefcase size={13} style={{ color: ACCENT_2 }} />
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate">{m.name}</div>
-                              {m.firm && <div className="text-[10px] truncate" style={{ color: TEXT_MUTE }}>{m.firm}</div>}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </>
-                  )}
-                  {searchResults.positions.length > 0 && (
-                    <>
-                      <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Tokens</div>
-                      {searchResults.positions.map((t) => (
-                        <button key={t.key}
-                          onClick={() => {
-                            setSearchQuery(''); setOpenMenu(null);
-                            setDetailToken({ cgTokenId: t.cgTokenId, symbol: t.ticker, name: t.name });
-                          }}
-                          className="w-full text-left px-3 py-2 text-xs flex items-center gap-2"
-                          style={{ color: TEXT }}>
-                          <TokenIcon ticker={t.ticker} name={t.name} size={20} />
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate">
-                              <span style={{ fontWeight: 600 }}>{t.ticker || t.name}</span>
-                              {t.ticker && t.name !== t.ticker && (
-                                <span style={{ color: TEXT_DIM }}> · {t.name}</span>
-                              )}
-                            </div>
-                            <div className="text-[10px] truncate" style={{ color: TEXT_MUTE }}>
-                              {t.exposures.length === 1
-                                ? `1 fund: ${t.exposures[0].manager?.name || '?'} · ${fundLabel(t.exposures[0].soi)}`
-                                : `${t.exposures.length} funds`}
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          <SearchBox
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            searchResults={searchResults}
+            store={store}
+            onOpenClient={(c) => {
+              setSearchQuery(""); setSelection({kind:"client", id:c.id}); setTab("overview"); setDrilldownSoi(null); setOpenMenu(null);
+            }}
+            onOpenManager={(_m, mSois) => {
+              setSearchQuery(""); setTab("managers"); setDrilldownSoi(mSois[0]?.id || null); setOpenMenu(null);
+            }}
+            onOpenToken={(t) => {
+              setSearchQuery(""); setOpenMenu(null);
+              setDetailToken({ cgTokenId: t.cgTokenId, symbol: t.ticker, name: t.name });
+            }}
+          />
 
           {/* Settings gear */}
           <button onClick={() => setSettingsOpen(true)}
@@ -638,58 +347,22 @@ export default function App() {
         </div>
 
         {/* ========= CONTEXT ROW ========= */}
-        <div className="max-w-[1600px] mx-auto px-6 py-2 flex items-center gap-3 flex-wrap" style={{ borderTop: `1px solid ${BORDER}` }}>
-          <Breadcrumb store={store} selection={selection} drilldownSoi={drilldownSoi}
-            onCrumb={(sel) => { setSelection(sel); setDrilldownSoi(null); setOpenMenu(null); setTab(sel.kind === 'manager' ? 'managers' : 'overview'); }} />
-          {selection.kind === 'client' && (
-            <button onClick={() => setClientShareMode(m => !m)}
-              className="px-2.5 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition-colors"
-              style={{
-                backgroundColor: clientShareMode ? ACCENT + '22' : 'transparent',
-                color: clientShareMode ? ACCENT_2 : TEXT_DIM,
-                border: `1px solid ${clientShareMode ? ACCENT + '44' : BORDER}`,
-              }}>
-              {clientShareMode ? '⊗ Client share' : '⊞ Full fund'}
-            </button>
-          )}
-
-          <div className="flex-1" />
-
-          {/* As-of-date */}
-          <div className="flex items-center gap-1.5">
-            <Calendar size={12} style={{ color: TEXT_MUTE }} />
-            <span className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>As of</span>
-            <input type="date" value={asOfDate} onChange={e=>setAsOfDate(e.target.value)}
-              className="text-xs rounded px-2 py-1 outline-none"
-              style={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, color: TEXT, colorScheme: 'dark' }}
-            />
-          </div>
-
-          {store.settings.lastRefresh && (
-            <div className="text-[10px]" style={{ color: TEXT_MUTE }}>
-              {new Date(store.settings.lastRefresh).toLocaleTimeString()}
-            </div>
-          )}
-          {/* Live prices toggle — when OFF, no CoinGecko auto-fetch fires; saves demo credits during iteration. */}
-          <button
-            onClick={() => updateStore(st => ({ ...st, settings: { ...st.settings, useLivePrices: !st.settings.useLivePrices } }))}
-            className="px-2.5 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition-colors"
-            title={store.settings.useLivePrices ? 'Live CoinGecko prices ON — click to disable (saves API credits)' : 'Live CoinGecko prices OFF — click to enable (auto-fetches history)'}
-            style={{
-              backgroundColor: store.settings.useLivePrices ? ACCENT + '22' : 'transparent',
-              color: store.settings.useLivePrices ? ACCENT_2 : TEXT_DIM,
-              border: `1px solid ${store.settings.useLivePrices ? ACCENT + '44' : BORDER}`,
-            }}>
-            <span style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: store.settings.useLivePrices ? '#3ecf8e' : TEXT_MUTE }} />
-            Live: {store.settings.useLivePrices ? 'ON' : 'OFF'}
-          </button>
-          <button onClick={refreshPrices} disabled={priceLoading || !store.settings.useLivePrices}
-            className="px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition-colors"
-            style={{ border: `1px solid ${BORDER}`, color: TEXT, backgroundColor: PANEL_2, opacity: (priceLoading || !store.settings.useLivePrices) ? 0.4 : 1 }}>
-            <RefreshCw size={12} className={priceLoading ? 'animate-spin' : ''} />
-            {priceLoading ? 'Fetching…' : 'Refresh'}
-          </button>
-        </div>
+        <ContextRow
+          store={store}
+          selection={selection}
+          drilldownSoi={drilldownSoi}
+          asOfDate={asOfDate}
+          clientShareMode={clientShareMode}
+          priceLoading={priceLoading}
+          setSelection={setSelection}
+          setDrilldownSoi={setDrilldownSoi}
+          setOpenMenu={setOpenMenu}
+          setTab={setTab}
+          setClientShareMode={setClientShareMode}
+          setAsOfDate={setAsOfDate}
+          updateStore={updateStore}
+          refreshPrices={refreshPrices}
+        />
 
         {/* Click-off overlay for any open dropdown menu or active search. */}
         {(openMenu || searchResults) && (
@@ -707,61 +380,18 @@ export default function App() {
         const useSidebarLayout = !isManagersGrid && rollup.positionCount > 0;
         const onManagerOrVintage = selection.kind === 'manager' || selection.kind === 'vintage' || !!drilldownSoi;
         const HeaderBlock = (
-          <>
-            {/* Selection summary line */}
-            <div className="flex items-baseline justify-between mb-6">
-              <div>
-                <div className="text-xs uppercase tracking-wider" style={{ color: TEXT_MUTE }}>
-                  {selection.kind === 'firm' ? 'Firm-wide rollup (all clients, all managers)' :
-                   selection.kind === 'client' ? 'Client portfolio' :
-                   selection.kind === 'manager' ? 'Manager (all vintages, across clients)' : 'Single fund vintage'}
-                </div>
-                {selection.kind === 'client' ? (
-                  <EditableText
-                    tag="h1"
-                    className="text-2xl font-semibold mt-0.5"
-                    style={{ display: 'inline-block', minWidth: 180 }}
-                    value={selectionLabel}
-                    placeholder="Name this portfolio…"
-                    onCommit={(nextName) => {
-                      if (!nextName) return;
-                      updateStore(st => ({
-                        ...st,
-                        clients: st.clients.map(c => c.id === selection.id ? { ...c, name: nextName } : c),
-                      }));
-                    }}
-                  />
-                ) : (
-                  <h1 className="text-2xl font-semibold mt-0.5">{selectionLabel}</h1>
-                )}
-              </div>
-              <div className="text-right">
-                <div className="text-xs uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Total exposure</div>
-                <div className="text-2xl font-semibold">{fmtCurrency(rollup.totalNAV)}</div>
-                {clientShareMode && selection?.kind === 'client' && (
-                  <div className="text-[10px] mt-0.5" style={{color: TEXT_DIM}}>Scaled to client's pro-rata share of called capital</div>
-                )}
-              </div>
-            </div>
-
-            {priceError && (
-              <Panel className="p-3 mb-4 flex items-center gap-2" style={{ borderColor: RED + '66', backgroundColor: RED + '11' }}>
-                <AlertCircle size={14} style={{ color: RED }} />
-                <span className="text-xs" style={{ color: RED }}>{priceError}</span>
-              </Panel>
-            )}
-
-            {rollup.positionCount === 0 && (
-              <Panel className="p-12 text-center">
-                <div className="text-sm" style={{ color: TEXT_DIM }}>No positions in this selection yet.</div>
-                <button onClick={() => setImportOpen(true)}
-                  className="mt-4 px-4 py-2 rounded text-xs font-medium inline-flex items-center gap-1.5"
-                  style={{ backgroundColor: ACCENT, color: BG }}>
-                  <Upload size={12} /> Import a snapshot
-                </button>
-              </Panel>
-            )}
-          </>
+          <ScopeHeader
+            selection={selection}
+            selectionLabel={selectionLabel}
+            rollup={rollup}
+            clientShareMode={clientShareMode}
+            priceError={priceError}
+            onRenameClient={(nextName) => updateStore(st => ({
+              ...st,
+              clients: st.clients.map(c => c.id === selection.id ? { ...c, name: nextName } : c),
+            }))}
+            onImport={() => setImportOpen(true)}
+          />
         );
 
         const ContentForOverview = (
