@@ -41,9 +41,9 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
   const [selectedSnapId, setSelectedSnapId] = useState(() => latestSnapshot(soi)?.id ?? null);
   useEffect(() => { setSelectedSnapId(latestSnapshot(soi)?.id ?? null); }, [soiId]);
 
-  if (!soi) return null;
-
-  const selectedSnap = snaps.find(s => s.id === selectedSnapId) || latestSnapshot(soi) || snaps[0];
+  const selectedSnap = soi
+    ? (snaps.find(s => s.id === selectedSnapId) || latestSnapshot(soi) || snaps[0])
+    : null;
 
   // Build enriched positions for this one SOI
   const rows = useMemo(() => {
@@ -69,7 +69,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
 
   // Minimal rollup object for shared panels (LiquidityBreakdownPanel, TopMoversPanel).
   const fundRollup = useMemo(() => {
-    const enriched = rows.map(r => ({ ...r, managerName: manager?.name, vintage: soi.vintage, soiId: soi.id }));
+    const enriched = rows.map(r => ({ ...r, managerName: manager?.name, vintage: soi?.vintage, soiId: soi?.id }));
     const byTok = {};
     for (const p of enriched) {
       const key = (p.ticker && p.ticker.toUpperCase()) || p.positionName;
@@ -87,7 +87,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
       t.soiValue += p.soiMarketValue || 0;
       t.quantity += p.quantity || 0;
       t.cost += p.costBasis || 0;
-      t.managers.add(`${manager?.name || '?'} ${soi.vintage}`);
+      t.managers.add(`${manager?.name || '?'} ${soi?.vintage ?? ''}`);
       t.positions.push(p);
       if (p.liquid) t.liquid = true;
     }
@@ -101,6 +101,8 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
       liquidPct: totalNAV > 0 ? (liquidNAV / totalNAV) * 100 : 0,
     };
   }, [rows, manager, soi, totalNAV, liquidNAV, illiquidNAV]);
+
+  if (!soi) return null;
 
   const bySector = _.groupBy(rows, 'sectorId');
   const sectorData = getSectors().map(s => {
