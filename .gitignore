@@ -23,6 +23,9 @@ _extract.py
 _rewrite.py
 _split_components.py
 _split_pages.py
+_sweep_unused.py
+_strip_react.py
+_debug.py
 
 # Local-only Claude Code settings
 .claude/settings.local.json
