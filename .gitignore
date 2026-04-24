@@ -17,3 +17,12 @@ dist
 
 # Catena helper scripts (local-only)
 push-to-github.bat
+
+# One-shot refactor scripts
+_extract.py
+_rewrite.py
+_split_components.py
+_split_pages.py
+
+# Local-only Claude Code settings
+.claude/settings.local.json

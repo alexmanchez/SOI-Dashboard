@@ -1,1093 +1,61 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef, useContext, createContext } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef, useContext } from 'react';
 import catenaLogo from './assets/catena-logo.png';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import _ from 'lodash';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, LineChart, Line, ReferenceLine, ReferenceArea } from 'recharts';
 import { Upload, RefreshCw, AlertCircle, Layers, Search, Lock, ArrowLeft, FileSpreadsheet, Activity, Plus, Settings, Download, Trash2, Users, Briefcase, Building2, ChevronDown, ChevronRight, Edit2, X, Check, Eye, EyeOff, TrendingUp, Calendar, Home, Globe, Twitter, Linkedin, ExternalLink, PieChart as PieChartIcon, DollarSign, LayoutDashboard } from 'lucide-react';
+import {
+  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
+  ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
+} from './lib/theme';
+import {
+  fmtCurrency, fmtPct, fmtPctSigned, fmtMoic, fmtNum, fundLabel, uid, today,
+} from './lib/format';
+import {
+  DEFAULT_SECTORS, DEFAULT_TOKEN_SECTOR, LEGACY_SECTOR_MAP, UNCLASSIFIED,
+  getSectors, setSectors, sectorOf, resolveSector,
+} from './lib/sectors';
+import { RANGES, MOVER_RANGES, DETAIL_RANGES, rangeToStartMs, rangeToDays } from './lib/ranges';
+import {
+  FIELDS, SUBTOTAL_PATTERNS, normalize, parseNum, parseDate,
+  matchScore, autoMapColumns, detectHeaderRow, dedupeHeaders,
+} from './lib/parsing';
+import { STORE_KEY, emptyStore, loadStore, saveStore } from './lib/storage';
+import { seedStore } from './lib/seed';
+import {
+  snapshotsOf, latestSnapshot, sortedSnapshots, isLiquid, liquidityOverrideOf,
+} from './lib/snapshots';
+import { getSelectedSOIs, computeRollup, buildNAVSeries, buildNAVSeriesSimple } from './lib/rollup';
+import {
+  CG_BASE, EMBEDDED_CG_API_KEY, resolveApiKey,
+  fetchLivePrices, fetchCoinDetail, fetchCoinChart, fetchHistory,
+} from './lib/api/coingecko';
+import {
+  CR_BASE, EMBEDDED_CR_API_KEY, cryptorankFetch,
+  TOKEN_IMAGES_CACHE_KEY, loadTokenImagesCache, saveTokenImagesCache, fetchTokenImagesMap,
+} from './lib/api/cryptorank';
+import {
+  EMBEDDED_CMC_API_KEY, CMC_IMG, CMC_GIF,
+  CMC_ID_CACHE_KEY, cmcFetch, loadCmcIdCache, saveCmcIdCache, fetchCmcIdMap,
+} from './lib/api/coinmarketcap';
+import { TokenImageContext, OpenTokenDetailContext } from './contexts';
 
-/* =============================================================================
-   CATENA — Crypto Portfolio Exposure Dashboard
-   ============================================================================= */
 
-// --- Dark theme palette (Yahoo-Finance-adjacent, CA-tinted) --------------------
-// Catena palette — institutional cypherpunk. Backgrounds are near-black
-// with a deep blue-violet lean, panels a subtle navy-purple, borders quiet.
-// The primary accent is an electric teal (the signature pop color). Lime /
-// Punch / Gold provide positive / negative / highlight accents. Violet is
-// reserved for FoF.
-const BG        = '#070B14';   // deep blue-black (cypherpunk canvas)
-const PANEL     = '#0D1524';   // panel on near-black
-const PANEL_2   = '#151F38';   // hover / active panel (slightly lifted)
-const BORDER    = '#1E2B45';   // quiet navy-purple border
-const TEXT      = '#EEF3FA';   // soft near-white
-const TEXT_DIM  = '#8D97A8';   // cool dim (CA Gray — shifted cooler)
-const TEXT_MUTE = '#58637A';   // muted slate
-const ACCENT    = '#22D3C5';   // electric teal (cypherpunk signature)
-const ACCENT_2  = '#5EEADA';   // teal highlight
-const GREEN     = '#9FCD2E';   // Lime (positives / up-moves)
-const RED       = '#E25D6E';   // Punch, softened for dark (negatives)
-const GOLD      = '#D4A64F';   // Gold warmed up (pills / highlights)
-const VIOLET    = '#9D7AFF';   // electric violet (FoF accent)
 
-// GICS-style 5-bucket taxonomy seed (user can add/edit/remove in Settings)
-const DEFAULT_SECTORS = [
-  { id: 'base-layer',       label: 'Base Layer',              color: '#22D3C5', desc: 'L1 blockchains (BTC, ETH, SOL, TIA)' },
-  { id: 'infrastructure',   label: 'Infrastructure',          color: '#5EA0F2', desc: 'L2s, middleware, oracles, bridges, indexing' },
-  { id: 'defi',             label: 'DeFi',                    color: '#9FCD2E', desc: 'DEXs, lending, perps, yield' },
-  { id: 'gaming',           label: 'Gaming',                  color: '#EC4899', desc: 'On-chain gaming, metaverse' },
-  { id: 'depin',            label: 'DePIN',                   color: '#06B6D4', desc: 'Decentralized physical infrastructure networks' },
-  { id: 'ai-compute',       label: 'AI & Compute',            color: '#9D7AFF', desc: 'AI protocols, GPU markets, training' },
-  { id: 'consumer-media',   label: 'Consumer & Media',        color: '#F59E0B', desc: 'Social, NFT, creator, content' },
-  { id: 'security-privacy', label: 'Security & Privacy',      color: '#E25D6E', desc: 'ZK, privacy, auditing, compliance' },
-  { id: 'stablecoins',      label: 'Stablecoins & Cash',      color: '#A7A9AC', desc: 'USDC, USDT, DAI, USDe' },
-  { id: 'rwa-credit',       label: 'RWA & Credit',            color: '#D4A64F', desc: 'Tokenized RWAs, on-chain debt' },
-  { id: 'staking',          label: 'Staking & Restaking',     color: '#10B981', desc: 'Liquid staking, restaking, validators' },
-];
-// Module-level mutable ref. Reassigned from store.sectors at top of SOIDashboard render,
-// before any useMemo/compute runs, so all downstream consumers see the current list.
-let SECTORS = DEFAULT_SECTORS;
-const UNCLASSIFIED = { id: 'unclassified', label: 'Unclassified', color: '#6B7280' };
-const sectorOf = (id) => SECTORS.find(s => s.id === id) || UNCLASSIFIED;
 
-// Canonical token → sector map (seed; user can override in Settings)
-const DEFAULT_TOKEN_SECTOR = {
-  // Base Layer (L1s)
-  'BTC': 'base-layer', 'ETH': 'base-layer', 'SOL': 'base-layer',
-  'SUI': 'base-layer', 'APT': 'base-layer', 'SEI': 'base-layer',
-  'TIA': 'base-layer', 'NEAR': 'base-layer', 'AVAX': 'base-layer',
-  'TON': 'base-layer', 'ADA': 'base-layer', 'DOT': 'base-layer',
-  'INJ': 'base-layer', 'BERA': 'base-layer', 'MNT': 'base-layer',
-  'MOVE': 'base-layer', 'MONAD': 'base-layer',
-  // Infrastructure (L2s, oracles, bridges)
-  'ARB': 'infrastructure', 'OP': 'infrastructure', 'STRK': 'infrastructure',
-  'MATIC': 'infrastructure', 'POL': 'infrastructure', 'BASE': 'infrastructure',
-  'LINK': 'infrastructure', 'GRT': 'infrastructure', 'AXL': 'infrastructure',
-  'AR': 'infrastructure', 'ATH': 'infrastructure',
-  // DeFi
-  'UNI': 'defi', 'AAVE': 'defi', 'COMP': 'defi', 'CRV': 'defi',
-  'LDO': 'defi', 'PENDLE': 'defi', 'GMX': 'defi', 'DYDX': 'defi',
-  'HYPE': 'defi', 'ENA': 'defi', 'MORPHO': 'defi', 'JUP': 'defi',
-  // Gaming
-  'IMX': 'gaming', 'RON': 'gaming', 'SAND': 'gaming', 'MANA': 'gaming',
-  'AXS': 'gaming', 'PRIME': 'gaming', 'GAME': 'gaming',
-  // DePIN
-  'GRASS': 'depin', 'RNDR': 'depin', 'RENDER': 'depin', 'FIL': 'depin',
-  'HNT': 'depin', 'IOT': 'depin', 'OCEAN': 'depin',
-  // AI & Compute
-  'FET': 'ai-compute', 'TAO': 'ai-compute', 'AGIX': 'ai-compute',
-  'WLD': 'ai-compute', 'ICP': 'ai-compute',
-  // Consumer & Media
-  'STORY': 'consumer-media',
-  // Security & Privacy
-  'XMR': 'security-privacy', 'ZEC': 'security-privacy',
-  // Stablecoins & Cash
-  'USDC': 'stablecoins', 'USDT': 'stablecoins', 'DAI': 'stablecoins',
-  'FRAX': 'stablecoins', 'USDE': 'stablecoins', 'PYUSD': 'stablecoins', 'USD': 'stablecoins',
-  // RWA & Credit
-  'ONDO': 'rwa-credit', 'MKR': 'rwa-credit',
-  // Staking & Restaking
-  'EIGEN': 'staking', 'JTO': 'staking', 'RPL': 'staking',
-  'ETHFI': 'staking', 'REZ': 'staking', 'KMNO': 'staking',
-};
 
-// Time range pills
-const RANGES = [
-  { id: '1D',  label: '1D',  days: 1 },
-  { id: 'MTD', label: 'MTD', days: null }, // computed
-  { id: 'YTD', label: 'YTD', days: null },
-  { id: '1Y',  label: '1Y',  days: 365 },
-  { id: 'SI',  label: 'SI',  days: null }, // since inception
-];
 
-// --- Parsing helpers (preserved from v1) -------------------------------------
-const FIELDS = {
-  positionName:   { label: 'Position Name',          required: true,  synonyms: ['position name','position','name','asset','asset name','security','security name','holding','holdings','investment','investment name','company','company name','issuer','description','token name','instrument','portfolio company'] },
-  ticker:         { label: 'Ticker / Symbol',        required: false, synonyms: ['ticker','symbol','ticker/symbol','token','token symbol','cusip'] },
-  assetType:      { label: 'Asset Type',             required: false, synonyms: ['asset type','type','instrument type','security type','instrument','asset class','investment type','holding type'] },
-  sector:         { label: 'Sector / Category',      required: false, synonyms: ['sector','category','sector/category','industry','vertical','theme','classification','gics sector','sub-sector','sub sector','strategy'] },
-  quantity:       { label: 'Quantity',               required: false, synonyms: ['quantity','qty','shares','units','tokens','coins','position size','number of shares','# shares','par','par value','principal','notional'] },
-  price:          { label: 'Price (at SOI)',         required: false, synonyms: ['price','unit price','price per share','mark','mark price','last price','nav per unit','price per unit','current price'] },
-  costBasis:      { label: 'Cost Basis',             required: false, synonyms: ['cost basis','cost','book value','invested capital','basis','acquisition cost','total cost','original cost','cost ($)','investment cost'] },
-  marketValue:    { label: 'Market Value (at SOI)',  required: true,  synonyms: ['market value','mv','fair value','fv','value','nav contribution','current value','mkt value','market val','fmv','ending value','ending mv','ending market value','value ($)','gross market value','gross exposure','net asset value','nav','position value'] },
-  unrealizedPL:   { label: 'Unrealized P&L',         required: false, synonyms: ['unrealized gain/loss','unrealized p&l','unrealized pnl','unrealized gain (loss)','ugl','gain/loss','p&l','pnl','unrealized','unrealized profit','unrealized gain','u/g/l','gain loss'] },
-  pctNav:         { label: '% of NAV',               required: false, synonyms: ['% of nav','pct of nav','% nav','percent of nav','weight','% of portfolio','portfolio %','allocation','pct','% weight','% of total','portfolio weight','% of aum','% of fund'] },
-  acquisitionDate:{ label: 'Acquisition Date',       required: false, synonyms: ['acquisition date','date','purchase date','entry date','invested date','buy date','date acquired','initial investment date','trade date'] },
-  liquidity:      { label: 'Liquidity',              required: false, synonyms: ['liquidity','liquidity tier','lockup','vesting','liquid/locked','liquid','liquidity profile','lock-up'] },
-};
-const SUBTOTAL_PATTERNS = /^(total|subtotal|sub-total|grand total|sum|net total|fund total|portfolio total|aggregate)/i;
 
-const normalize = (s) => String(s ?? '').toLowerCase().trim().replace(/[_\-\/]/g, ' ').replace(/[()]/g, '').replace(/\s+/g, ' ');
-const parseNum = (v) => {
-  if (v === null || v === undefined || v === '') return null;
-  if (typeof v === 'number') return isNaN(v) ? null : v;
-  let s = String(v).trim();
-  if (!s || s === '-' || s === '–' || s === 'N/A' || s === 'n/a') return null;
-  const isNegParen = /^\(.+\)$/.test(s);
-  s = s.replace(/[$,%\s€£¥]/g, '').replace(/[()]/g, '');
-  const n = parseFloat(s);
-  if (isNaN(n)) return null;
-  return isNegParen ? -n : n;
-};
-const parseDate = (v) => {
-  if (!v) return null;
-  if (v instanceof Date && !isNaN(v)) return v;
-  if (typeof v === 'number' && v > 10000 && v < 60000) {
-    const ms = (v - 25569) * 86400 * 1000;
-    const d = new Date(ms); return isNaN(d) ? null : d;
-  }
-  const d = new Date(v); return isNaN(d) ? null : d;
-};
-const matchScore = (header, candidates) => {
-  const n = normalize(header); if (!n) return 0;
-  let best = 0;
-  for (const c of candidates) {
-    if (n === c) best = Math.max(best, 100);
-    else if (n === c.replace(/\s/g, '')) best = Math.max(best, 95);
-    else if (n.startsWith(c) || c.startsWith(n)) best = Math.max(best, 85);
-    else if (n.includes(c) && c.length >= 3) best = Math.max(best, 75);
-    else if (c.includes(n) && n.length >= 3) best = Math.max(best, 65);
-  }
-  return best;
-};
-const autoMapColumns = (headers) => {
-  const mapping = {}; const scores = {}; const used = new Set();
-  const candidates = [];
-  for (const [field, def] of Object.entries(FIELDS)) {
-    for (const h of headers) {
-      const s = matchScore(h, def.synonyms);
-      if (s > 0) candidates.push({ field, header: h, score: s });
-    }
-  }
-  candidates.sort((a, b) => b.score - a.score);
-  for (const c of candidates) {
-    if (mapping[c.field] || used.has(c.header) || c.score < 60) continue;
-    mapping[c.field] = c.header; scores[c.field] = c.score; used.add(c.header);
-  }
-  return { mapping, scores };
-};
-const detectHeaderRow = (rows) => {
-  const allSynonyms = Object.values(FIELDS).flatMap(f => f.synonyms);
-  const limit = Math.min(25, rows.length);
-  let bestRow = 0, bestScore = 0;
-  for (let i = 0; i < limit; i++) {
-    const row = rows[i] || [];
-    const cells = row.map(c => normalize(c)).filter(Boolean);
-    if (cells.length < 3) continue;
-    let hits = 0;
-    for (const cell of cells) {
-      for (const syn of allSynonyms) { if (cell === syn || cell.includes(syn) || syn.includes(cell)) { hits++; break; } }
-    }
-    const textCells = row.filter(c => c && typeof c === 'string' && isNaN(parseNum(c))).length;
-    const score = hits * 3 + textCells;
-    if (score > bestScore && hits >= 2) { bestScore = score; bestRow = i; }
-  }
-  return bestRow;
-};
-const dedupeHeaders = (headers) => {
-  const seen = {};
-  return headers.map((h, i) => {
-    const base = h && String(h).trim() ? String(h).trim() : `Column ${i + 1}`;
-    if (seen[base] === undefined) { seen[base] = 0; return base; }
-    seen[base]++; return `${base} (${seen[base]})`;
-  });
-};
 
-// --- Format helpers -----------------------------------------------------------
-const fmtCurrency = (v, digits) => {
-  if (v === null || v === undefined || isNaN(v)) return '–';
-  const abs = Math.abs(v);
-  const sign = v < 0 ? '-' : '';
-  const d = digits !== undefined ? digits : (abs >= 1e6 ? 2 : abs >= 1e3 ? 1 : 0);
-  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(d)}B`;
-  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(d)}M`;
-  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(d)}K`;
-  return `${sign}$${abs.toFixed(d)}`;
-};
-const fmtPct = (v, d=2) => (v === null || v === undefined || isNaN(v)) ? '–' : `${v.toFixed(d)}%`;
-const fmtPctSigned = (v, d=2) => {
-  if (v === null || v === undefined || isNaN(v)) return '–';
-  const sign = v > 0 ? '+' : '';
-  return `${sign}${v.toFixed(d)}%`;
-};
-const fmtMoic = (v) => (v === null || v === undefined || isNaN(v) || !isFinite(v)) ? '—' : `${v.toFixed(2)}×`;
-const uid = () => Math.random().toString(36).slice(2, 10);
 
-const fmtNum = (v, digits) => {
-  if (v === null || v === undefined || isNaN(v)) return '–';
-  const abs = Math.abs(v);
-  const d = digits !== undefined ? digits : 2;
-  if (abs >= 1e12) return (v/1e12).toFixed(d) + 'T';
-  if (abs >= 1e9)  return (v/1e9).toFixed(d) + 'B';
-  if (abs >= 1e6)  return (v/1e6).toFixed(d) + 'M';
-  if (abs >= 1e3)  return (v/1e3).toFixed(d) + 'K';
-  return Math.round(v).toLocaleString();
-};
 
-// Human-friendly label for a fund snapshot: "Fund Name (2023)" when both
-// are present, else whichever is available. Tolerates old data where the
-// fund name was stored in `vintage`.
-const fundLabel = (soi) => {
-  if (!soi) return '—';
-  const fund = soi.fundName;
-  const year = soi.vintage;
-  if (fund && year) return `${fund} (${year})`;
-  return fund || year || '—';
-};
-const today = () => new Date().toISOString().slice(0,10);
 
-/* =============================================================================
-   DATA MODEL
-   ---------
-   Store shape:
-   {
-     clients:   [{id, name, notes}]
-     managers:  [{id, name, firm}]                 (e.g., "Nimbus Digital Capital")
-     soIs:      [{id, managerId, vintage,
-                  snapshots: [{id, asOfDate, notes,
-                    positions: [ {id, positionName, ticker, quantity, soiPrice,
-                                 costBasis, soiMarketValue, acquisitionDate, assetType,
-                                 sectorId,          // our canonical GICS bucket
-                                 forceLiquid,       // user flipped "mark as liquid after TGE"
-                                 cgTokenId,         // optional: resolved CoinGecko coin id for live price
-                                 chain, address,    // optional: onchain identity
-                                 notes} ] }] }]
-     commitments: [{id, clientId, managerId, soiId, committed, called}]
-       // one client can commit to a manager/vintage. commitment data drives the
-       // rollup: positions inside soi are scaled to the commitment's "called" value
-       // implicitly (we treat the SOI's MV total as the called NAV for v1).
-     sectorOverrides: { [symbolUpper]: sectorId }
-     settings:  { cgApiKey, useLivePrices, lastRefresh }
-   }
-   ============================================================================= */
 
-const STORE_KEY = 'catena.store.v5'; // v5: 11-sector taxonomy
-const emptyStore = () => ({
-  clients: [], managers: [], soIs: [], commitments: [],
-  sectorOverrides: {}, sectors: DEFAULT_SECTORS,
-  settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null },
-});
 
-const loadStore = () => {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    // Basic shape validation
-    if (!parsed.clients || !parsed.managers || !parsed.soIs || !parsed.commitments) return null;
-    // Migrate: ensure sectors array exists for pre-Stage-4 stores
-    if (!Array.isArray(parsed.sectors) || parsed.sectors.length === 0) parsed.sectors = DEFAULT_SECTORS;
-    // Migrate: wrap legacy flat positions into snapshots array
-    for (const soi of parsed.soIs) {
-      if (!Array.isArray(soi.snapshots) || soi.snapshots.length === 0) {
-        soi.snapshots = [{ id: soi.id + '_snap', asOfDate: soi.asOfDate || '', notes: soi.notes || '', positions: soi.positions || [] }];
-        delete soi.positions;
-        delete soi.asOfDate;
-      }
-    }
-    // Migrate: reset legacy called values that were set to fund total MV
-    for (const c of parsed.commitments) {
-      const soi = parsed.soIs.find(s => s.id === c.soiId);
-      if (!soi) continue;
-      const fundTotalMV = _.sumBy(latestSnapshot(soi)?.positions || [], p => p.soiMarketValue || 0);
-      if (fundTotalMV > 0 && c.called > 0 && Math.abs(c.called - fundTotalMV) / fundTotalMV < 0.01) {
-        c.called = Math.round((c.committed || 0) * 0.7);
-      }
-    }
-    // Migrate: add type field to managers (default 'direct' for pre-Stage-6 stores)
-    for (const m of parsed.managers) {
-      if (!m.type) m.type = 'direct';
-    }
-    // Migrate: add subCommitments array to every snapshot (default [] for pre-Stage-6 stores)
-    for (const soi of parsed.soIs) {
-      for (const snap of snapshotsOf(soi)) {
-        if (!Array.isArray(snap.subCommitments)) snap.subCommitments = [];
-      }
-    }
-    // Migrate: if stored sectors don't include the v5 'base-layer' bucket,
-    // replace sectors with DEFAULT_SECTORS. Position sectorIds auto-resolve
-    // via DEFAULT_TOKEN_SECTOR through resolveSector() so they pick up the
-    // new buckets without explicit remapping.
-    const hasV5Sectors = Array.isArray(parsed.sectors) && parsed.sectors.some(s => s && s.id === 'base-layer');
-    if (!hasV5Sectors) parsed.sectors = DEFAULT_SECTORS;
-    return { ...emptyStore(), ...parsed, settings: { ...emptyStore().settings, ...(parsed.settings || {}) } };
-  } catch { return null; }
-};
-const saveStore = (store) => {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch {}
-};
 
-/* =============================================================================
-   SEED DATA — 1 client, 2 managers, 4 vintages, realistic overlap
-   ============================================================================= */
-const seedStore = () => {
-  const clientId = uid();
-  const fwId = uid(), hackId = uid();
-  const fw3Id = uid(), fw4Id = uid(), hack1Id = uid(), hack2Id = uid();
-  const atlasId = uid(), atlasFundId = uid();
 
-  const mkPos = (name, ticker, qty, price, mv, sectorId, date, opts={}) => ({
-    id: uid(),
-    positionName: name,
-    ticker,
-    quantity: qty,
-    soiPrice: price,
-    costBasis: opts.cost ?? null,
-    soiMarketValue: mv,
-    acquisitionDate: date,
-    assetType: opts.assetType || (ticker ? 'Liquid Token' : 'SAFT'),
-    sectorId,
-    forceLiquid: opts.forceLiquid || false,
-    cgTokenId: opts.cgTokenId || null,
-    chain: opts.chain || null, address: opts.address || null,
-    notes: opts.notes || '',
-  });
 
-  // --- Nimbus Digital Capital Token Growth Fund II (2021 vintage, older book, more liquid) ---
-  const fw3Positions = [
-    mkPos('Ethereum',         'ETH',   8500,   2200,  18_700_000, 'base-layer', '2021-05-15', { cost: 12_000_000, cgTokenId: 'ethereum' }),
-    mkPos('Solana',           'SOL',   220000, 28,    6_160_000,  'base-layer', '2021-06-10', { cost: 1_500_000,  cgTokenId: 'solana' }),
-    mkPos('Uniswap',          'UNI',   450000, 6.2,   2_790_000,  'defi',           '2021-07-01', { cost: 3_200_000,  cgTokenId: 'uniswap' }),
-    mkPos('Chainlink',        'LINK',  280000, 14,    3_920_000,  'infrastructure',     '2021-04-20', { cost: 2_100_000,  cgTokenId: 'chainlink' }),
-    mkPos('Lido DAO',         'LDO',   1400000,1.8,   2_520_000,  'defi',           '2022-01-11', { cost: 3_800_000,  cgTokenId: 'lido-dao' }),
-    mkPos('Arbitrum',         'ARB',   3200000,0.75,  2_400_000,  'infrastructure', '2023-03-23', { cost: 2_200_000,  cgTokenId: 'arbitrum' }),
-    mkPos('Optimism',         'OP',    1800000,1.65,  2_970_000,  'infrastructure', '2022-05-31', { cost: 1_900_000,  cgTokenId: 'optimism' }),
-    mkPos('Aave',              'AAVE', 35000,  95,    3_325_000,  'defi',           '2021-09-14', { cost: 4_100_000,  cgTokenId: 'aave' }),
-    mkPos('Synthetix SAFT',   '',      0,      0,     1_500_000,  'defi',           '2021-08-02', { assetType: 'SAFT' }),
-    mkPos('Ocean Protocol',   'OCEAN', 5000000,0.55,  2_750_000,  'depin',     '2021-11-03', { cost: 1_800_000,  cgTokenId: 'ocean-protocol' }),
-    mkPos('Axie Infinity',    'AXS',   180000, 6.8,   1_224_000,  'gaming',   '2021-10-05', { cost: 4_200_000,  cgTokenId: 'axie-infinity' }),
-    mkPos('USDC',             'USDC',  2000000,1,     2_000_000,  'stablecoins',    '2022-12-01', { cgTokenId: 'usd-coin', forceLiquid: true }),
-  ];
-
-  // --- Nimbus Digital Capital Opportunity Fund III (2023 vintage, newer, more SAFTs + modern tokens) ---
-  const fw4Positions = [
-    mkPos('Ethereum',          'ETH',  6200,    2800, 17_360_000, 'base-layer', '2023-04-12', { cost: 15_500_000, cgTokenId: 'ethereum' }),
-    mkPos('Solana',            'SOL',  150000,  95,   14_250_000, 'base-layer', '2023-02-20', { cost: 4_200_000,  cgTokenId: 'solana' }),
-    mkPos('EigenLayer',        'EIGEN',800000,  3.2,  2_560_000,  'staking',     '2024-05-12', { cost: 2_100_000,  cgTokenId: 'eigenlayer' }),
-    mkPos('Hyperliquid',       'HYPE', 280000,  24,   6_720_000,  'defi',           '2024-11-29', { cost: 3_500_000,  cgTokenId: 'hyperliquid' }),
-    mkPos('Celestia',          'TIA',  400000,  5.8,  2_320_000,  'base-layer', '2023-11-01', { cost: 3_800_000,  cgTokenId: 'celestia' }),
-    mkPos('Ondo Finance',      'ONDO', 2200000, 0.95, 2_090_000,  'rwa-credit',           '2024-01-18', { cost: 1_900_000,  cgTokenId: 'ondo-finance' }),
-    mkPos('Pendle',            'PENDLE',300000, 4.1,  1_230_000,  'defi',           '2023-07-22', { cost: 800_000,    cgTokenId: 'pendle' }),
-    mkPos('Jito',              'JTO',  600000,  3.2,  1_920_000,  'staking', '2023-12-07', { cost: 1_500_000,  cgTokenId: 'jito-governance-token' }),
-    mkPos('Monad SAFT',        '',     0,       0,    3_500_000,  'base-layer', '2024-02-15', { assetType: 'SAFT', notes: 'Locked; TGE est H2 2026' }),
-    mkPos('Berachain SAFT',    '',     0,       0,    2_800_000,  'base-layer', '2024-06-01', { assetType: 'SAFT', notes: 'Liquid since TGE Feb 2025', forceLiquid: true, ticker: 'BERA', cgTokenId: 'berachain-bera' }),
-    mkPos('Movement SAFT',     '',     0,       0,    1_500_000,  'base-layer', '2024-04-20', { assetType: 'SAFT' }),
-    mkPos('Story Protocol SAFT','',    0,       0,    1_800_000,  'consumer-media',   '2024-08-10', { assetType: 'SAFT' }),
-    mkPos('USDC',              'USDC', 3000000, 1,    3_000_000,  'stablecoins',    '2024-01-01', { cgTokenId: 'usd-coin', forceLiquid: true }),
-  ];
-
-  // --- Vertex Crypto Partners Fund III (2022 vintage) ---
-  const hack1Positions = [
-    mkPos('Ethereum',          'ETH',  3500,    1600, 5_600_000,  'base-layer', '2022-06-20', { cost: 4_800_000, cgTokenId: 'ethereum' }),
-    mkPos('Solana',            'SOL',  80000,   22,   1_760_000,  'base-layer', '2022-07-15', { cost: 3_200_000, cgTokenId: 'solana' }),
-    mkPos('Aptos',             'APT',  400000,  7.5,  3_000_000,  'base-layer', '2022-10-18', { cost: 1_200_000, cgTokenId: 'aptos' }),
-    mkPos('Sui',               'SUI',  2800000, 1.1,  3_080_000,  'base-layer', '2023-05-03', { cost: 1_500_000, cgTokenId: 'sui' }),
-    mkPos('EigenLayer',        'EIGEN',500000,  3.2,  1_600_000,  'staking',     '2024-05-12', { cost: 1_400_000, cgTokenId: 'eigenlayer' }),
-    mkPos('Render',            'RENDER',200000, 5.2,  1_040_000,  'depin',     '2022-11-25', { cost: 420_000,   cgTokenId: 'render-token' }),
-    mkPos('dYdX',              'DYDX', 800000,  1.2,  960_000,    'defi',           '2022-08-30', { cost: 2_400_000, cgTokenId: 'dydx-chain' }),
-    mkPos('Injective',         'INJ',  150000,  22,   3_300_000,  'base-layer', '2023-01-14', { cost: 800_000,   cgTokenId: 'injective-protocol' }),
-    mkPos('Worldcoin',         'WLD',  400000,  2.8,  1_120_000,  'ai-compute',   '2023-07-24', { cost: 1_000_000, cgTokenId: 'worldcoin-wld' }),
-    mkPos('Sei SAFT',          '',     0,       0,    900_000,    'base-layer', '2022-09-12', { assetType: 'SAFT', notes: 'Liquid since TGE', forceLiquid: true, ticker: 'SEI', cgTokenId: 'sei-network' }),
-    mkPos('USDC',              'USDC', 1500000, 1,    1_500_000,  'stablecoins',    '2022-06-01', { cgTokenId: 'usd-coin', forceLiquid: true }),
-  ];
-
-  // --- Vertex Crypto Partners Fund IV (2024 vintage, AI + infra heavy) ---
-  const hack2Positions = [
-    mkPos('Ethereum',          'ETH',  4800,    3200, 15_360_000, 'base-layer', '2024-02-05', { cost: 14_000_000, cgTokenId: 'ethereum' }),
-    mkPos('Solana',            'SOL',  95000,   135,  12_825_000, 'base-layer', '2024-01-20', { cost: 8_500_000,  cgTokenId: 'solana' }),
-    mkPos('Hyperliquid',       'HYPE', 180000,  24,   4_320_000,  'defi',           '2024-11-29', { cost: 2_200_000,  cgTokenId: 'hyperliquid' }),
-    mkPos('EigenLayer',        'EIGEN',1200000, 3.2,  3_840_000,  'staking',     '2024-05-12', { cost: 3_000_000,  cgTokenId: 'eigenlayer' }),
-    mkPos('Bittensor',         'TAO',  9000,    420,  3_780_000,  'ai-compute',   '2024-03-11', { cost: 1_800_000,  cgTokenId: 'bittensor' }),
-    mkPos('Fetch.ai',          'FET',  2500000, 1.3,  3_250_000,  'ai-compute',   '2024-04-02', { cost: 2_800_000,  cgTokenId: 'fetch-ai' }),
-    mkPos('Jupiter',           'JUP',  3500000, 0.92, 3_220_000,  'defi',           '2024-01-31', { cost: 2_500_000,  cgTokenId: 'jupiter-exchange-solana' }),
-    mkPos('Ethena',            'ENA',  5500000, 0.45, 2_475_000,  'defi',           '2024-04-02', { cost: 4_400_000,  cgTokenId: 'ethena' }),
-    mkPos('Celestia',          'TIA',  300000,  5.8,  1_740_000,  'base-layer', '2024-01-15', { cost: 2_700_000,  cgTokenId: 'celestia' }),
-    mkPos('Monad SAFT',        '',     0,       0,    2_500_000,  'base-layer', '2024-04-01', { assetType: 'SAFT', notes: 'Locked; TGE est H2 2026' }),
-    mkPos('Grass SAFT',        '',     0,       0,    1_200_000,  'depin',     '2024-03-20', { assetType: 'SAFT', notes: 'Liquid since TGE', forceLiquid: true, ticker: 'GRASS', cgTokenId: 'grass-2' }),
-    mkPos('Story Protocol SAFT','',    0,       0,    1_500_000,  'consumer-media',   '2024-08-10', { assetType: 'SAFT' }),
-    mkPos('USDC',              'USDC', 4000000, 1,    4_000_000,  'stablecoins',    '2024-01-01', { cgTokenId: 'usd-coin', forceLiquid: true }),
-  ];
-
-  // --- Vertex Fund IV older snapshot (~85% qty, ~75% MV) ---
-  const hack2PositionsOld = [
-    mkPos('Ethereum',  'ETH',  4080,  2900, 11_520_000,'base-layer','2024-02-05',{cost:14_000_000,cgTokenId:'ethereum'}),
-    mkPos('Solana',    'SOL',  80750, 115,   9_619_000,'base-layer','2024-01-20',{cost:8_500_000, cgTokenId:'solana'}),
-    mkPos('Hyperliquid','HYPE',153000,18,    3_240_000,'defi',          '2024-11-29',{cost:2_200_000, cgTokenId:'hyperliquid'}),
-    mkPos('EigenLayer','EIGEN',1020000,2.8,  2_880_000,'middleware',    '2024-05-12',{cost:3_000_000, cgTokenId:'eigenlayer'}),
-    mkPos('Bittensor', 'TAO',  7650,  380,   2_835_000,'ai-compute',  '2024-03-11',{cost:1_800_000, cgTokenId:'bittensor'}),
-    mkPos('Fetch.ai',  'FET',  2125000,1.1,  2_438_000,'ai-compute',  '2024-04-02',{cost:2_800_000, cgTokenId:'fetch-ai'}),
-    mkPos('Jupiter',   'JUP',  2975000,0.78, 2_415_000,'defi',          '2024-01-31',{cost:2_500_000, cgTokenId:'jupiter-exchange-solana'}),
-    mkPos('Ethena',    'ENA',  4675000,0.38, 1_856_000,'defi',          '2024-04-02',{cost:4_400_000, cgTokenId:'ethena'}),
-    mkPos('Celestia',  'TIA',  255000, 5.2,  1_305_000,'base-layer','2024-01-15',{cost:2_700_000, cgTokenId:'celestia'}),
-    mkPos('Monad SAFT','',     0,      0,    1_875_000,'infrastructure','2024-04-01',{assetType:'SAFT',notes:'Locked; TGE est H2 2026'}),
-    mkPos('Grass SAFT','',     0,      0,      900_000,'middleware',    '2024-03-20',{assetType:'SAFT',notes:'Liquid since TGE',forceLiquid:true,ticker:'GRASS',cgTokenId:'grass-2'}),
-    mkPos('Story Protocol SAFT','',0,  0,    1_125_000,'applications',  '2024-08-10',{assetType:'SAFT'}),
-    mkPos('USDC',      'USDC', 3000000,1,    3_000_000,'stablecoins',   '2024-01-01',{cgTokenId:'usd-coin',forceLiquid:true}),
-  ];
-
-  return {
-    clients: [{ id: clientId, name: 'Sample Family Office', notes: 'Seed demo client — illustrative only. All manager names, positions, and values are fictional.' }],
-    managers: [
-      { id: fwId,    name: 'Nimbus Digital Capital', firm: 'Nimbus', type: 'direct', socials: {} },
-      { id: hackId,  name: 'Vertex Crypto Partners', firm: 'Vertex', type: 'direct', socials: {} },
-      { id: atlasId, name: 'Atlas Capital Partners', firm: 'Atlas',  type: 'fund_of_funds', socials: {} },
-    ],
-    soIs: [
-      { id: fw3Id,      managerId: fwId,    fundName: 'Token Growth Fund II', vintage: '2023', snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '',                   positions: fw3Positions,  subCommitments: [] }] },
-      { id: fw4Id,      managerId: fwId,    fundName: 'Opportunity Fund III',         vintage: '2024', snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '',                   positions: fw4Positions,  subCommitments: [] }] },
-      { id: hack1Id,    managerId: hackId,  fundName: 'Fund III',                  vintage: '2022', snapshots: [{ id: uid(), asOfDate: '2025-09-30', notes: '',                   positions: hack1Positions, subCommitments: [] }] },
-      { id: hack2Id,    managerId: hackId,  fundName: 'Fund IV',                   vintage: '2024', snapshots: [
-        { id: uid(), asOfDate: '2025-06-30', notes: 'Q2 2025 statement', positions: hack2PositionsOld, subCommitments: [] },
-        { id: uid(), asOfDate: '2025-09-30', notes: 'Q3 2025 statement', positions: hack2Positions,    subCommitments: [] },
-      ]},
-      { id: atlasFundId, managerId: atlasId, fundName: 'Blockchain Fund II', vintage: '2022', snapshots: [{
-        id: uid(), asOfDate: '2025-09-30', notes: 'Q3 2025 — FoF look-through statement', positions: [],
-        subCommitments: [
-          { id: uid(), toSoiId: fw4Id,   committed: 5_000_000, called: 3_500_000, distributions: 0 },
-          { id: uid(), toSoiId: hack1Id, committed: 3_000_000, called: 2_100_000, distributions: 0 },
-          { id: uid(), toSoiId: hack2Id, committed: 8_000_000, called: 5_600_000, distributions: 0 },
-        ],
-      }]},
-    ],
-    commitments: [
-      { id: uid(), clientId, managerId: fwId,    soiId: fw3Id,      committed: 3_000_000, called: Math.round(3_000_000*0.7), distributions: 800_000 },
-      { id: uid(), clientId, managerId: fwId,    soiId: fw4Id,      committed: 5_000_000, called: Math.round(5_000_000*0.7), distributions: 200_000 },
-      { id: uid(), clientId, managerId: hackId,  soiId: hack1Id,    committed: 2_000_000, called: Math.round(2_000_000*0.7), distributions: 500_000 },
-      { id: uid(), clientId, managerId: hackId,  soiId: hack2Id,    committed: 8_000_000, called: Math.round(8_000_000*0.7), distributions: 0 },
-      { id: uid(), clientId, managerId: atlasId, soiId: atlasFundId, committed: 4_000_000, called: 2_800_000, distributions: 0 },
-    ],
-    sectorOverrides: {},
-    sectors: DEFAULT_SECTORS,
-    settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null },
-  };
-};
-
-/* =============================================================================
-   SNAPSHOT HELPERS
-   ============================================================================= */
-const snapshotsOf = (soi) => {
-  if (Array.isArray(soi.snapshots) && soi.snapshots.length) return soi.snapshots;
-  // legacy fallback
-  return [{ id: soi.id + '_snap', asOfDate: soi.asOfDate || '', notes: soi.notes || '', positions: soi.positions || [] }];
-};
-const latestSnapshot = (soi) => {
-  const snaps = snapshotsOf(soi);
-  return snaps.reduce((best, s) => (!best || (s.asOfDate || '') > (best.asOfDate || '')) ? s : best, null);
-};
-const sortedSnapshots = (soi) =>
-  [...snapshotsOf(soi)].sort((a, b) => (a.asOfDate || '') < (b.asOfDate || '') ? -1 : 1);
-
-/* =============================================================================
-   ROLLUP ENGINE
-   Given a store and a selection scope, return aggregated positions + metrics.
-   Selection = { kind: 'firm' | 'client' | 'manager' | 'vintage', id? }
-   ============================================================================= */
-const getSelectedSOIs = (store, selection) => {
-  if (!selection || selection.kind === 'firm') return store.soIs;
-  if (selection.kind === 'client') {
-    const soiIds = new Set(store.commitments.filter(c => c.clientId === selection.id).map(c => c.soiId));
-    return store.soIs.filter(s => soiIds.has(s.id));
-  }
-  if (selection.kind === 'manager') return store.soIs.filter(s => s.managerId === selection.id);
-  if (selection.kind === 'vintage') return store.soIs.filter(s => s.id === selection.id);
-  return [];
-};
-
-// Legacy sectorIds from the pre-v5 taxonomy get remapped here so stored
-// positions don't fall through to 'unclassified' when the app loads them.
-const LEGACY_SECTOR_MAP = {
-  'middleware':   'infrastructure',
-  'applications': 'consumer-media',
-};
-
-const resolveSector = (position, overrides) => {
-  const sym = String(position.ticker || '').toUpperCase().trim();
-  if (sym && overrides[sym]) return overrides[sym];
-  // Token map wins over stored sectorId so taxonomy updates auto-apply.
-  if (sym && DEFAULT_TOKEN_SECTOR[sym]) return DEFAULT_TOKEN_SECTOR[sym];
-  if (position.sectorId) return LEGACY_SECTOR_MAP[position.sectorId] || position.sectorId;
-  return UNCLASSIFIED.id;
-};
-
-const isLiquid = (position) => {
-  // Tri-state override: 'liquid' | 'illiquid' | 'auto' (default)
-  if (position.liquidityOverride === 'liquid') return true;
-  if (position.liquidityOverride === 'illiquid') return false;
-  // Back-compat: old forceLiquid boolean flag
-  if (position.forceLiquid) return true;
-  if (position.assetType === 'SAFT' || position.assetType === 'Warrant' || position.assetType === 'SAFE') return false;
-  return !!(position.ticker && position.quantity > 0);
-};
-const liquidityOverrideOf = (position) => {
-  if (position.liquidityOverride) return position.liquidityOverride;
-  if (position.forceLiquid) return 'liquid';
-  return 'auto';
-};
-
-const computeRollup = (store, selection, livePrices, scaleBy = null) => {
-  const soIs = getSelectedSOIs(store, selection);
-  const managerById = Object.fromEntries(store.managers.map(m => [m.id, m]));
-
-  // Per-position enrichment
-  const enriched = [];
-  let fofLookThroughCount = 0;
-
-  const enrichPosition = (p, opts) => {
-    const { sectorId, liquid, managerId, managerName, vintage, soiId, scale } = opts;
-    const live = p.cgTokenId && livePrices[p.cgTokenId];
-    const useLive = !!live && (liquid || p.forceLiquid);
-    const currentValue = useLive && p.quantity ? p.quantity * live.usd : p.soiMarketValue;
-    const change24h = useLive ? (live.change24h ?? null) : null;
-    enriched.push({
-      ...p,
-      sectorId, liquid, managerId, managerName, vintage, soiId,
-      soiMarketValue: (p.soiMarketValue || 0) * scale,
-      currentValue: currentValue * scale,
-      change24h, hasLivePrice: useLive,
-      livePrice: useLive ? live.usd : null,
-      _scale: scale,
-    });
-  };
-
-  for (const soi of soIs) {
-    const manager = managerById[soi.managerId];
-    const isFoF = manager?.type === 'fund_of_funds';
-
-    // FoF look-through: only in client scope
-    if (isFoF && selection.kind === 'client') {
-      const clientCommitment = store.commitments.find(c => c.clientId === selection.id && c.soiId === soi.id);
-      if (!clientCommitment) continue;
-      const subCommitments = latestSnapshot(soi)?.subCommitments || [];
-      const fofTotalCalled = _.sumBy(subCommitments, s => s.called || 0);
-      if (!subCommitments.length || fofTotalCalled <= 0) continue;
-
-      const clientCalled = clientCommitment.called || 0;
-      const clientShare = clientCalled / fofTotalCalled;
-      fofLookThroughCount++;
-
-      for (const sub of subCommitments) {
-        const targetSoi = store.soIs.find(s => s.id === sub.toSoiId);
-        if (!targetSoi) continue;
-        const targetManager = managerById[targetSoi.managerId];
-        if (targetManager?.type === 'fund_of_funds') {
-          console.warn('Catena: nested FoF beyond 1 level — skipping', sub.toSoiId);
-          continue;
-        }
-        const underlyingPositions = latestSnapshot(targetSoi)?.positions || [];
-        const underlyingMV = _.sumBy(underlyingPositions, p => p.soiMarketValue || 0);
-        if (underlyingMV <= 0) continue;
-        const fofShare = (sub.called || 0) / underlyingMV;
-        const scale = clientShare * fofShare;
-
-        for (const p of underlyingPositions) {
-          const sectorId = resolveSector(p, store.sectorOverrides);
-          const liquid = isLiquid(p);
-          enrichPosition(p, {
-            sectorId, liquid,
-            managerId: soi.managerId,
-            managerName: `${manager?.name || 'Unknown'} → ${targetManager?.name || '?'}`,
-            vintage: `${soi.vintage} → ${targetSoi.vintage}`,
-            soiId: soi.id,
-            scale,
-            fromFoF: true,
-            fofManagerName: manager?.name || 'FoF',
-          });
-        }
-      }
-      continue; // done with this FoF SOI
-    }
-
-    // Direct SOI (existing logic)
-    const scale = scaleBy ? (scaleBy(soi) ?? 1) : 1;
-    for (const p of (latestSnapshot(soi)?.positions || [])) {
-      const sectorId = resolveSector(p, store.sectorOverrides);
-      const liquid = isLiquid(p);
-      enrichPosition(p, {
-        sectorId, liquid,
-        managerId: soi.managerId,
-        managerName: manager?.name || 'Unknown',
-        vintage: soi.vintage,
-        soiId: soi.id,
-        scale,
-      });
-    }
-  }
-
-  const totalNAV = _.sumBy(enriched, 'currentValue');
-  const soiNAV   = _.sumBy(enriched, 'soiMarketValue');
-  const liquidNAV = _.sumBy(enriched.filter(p => p.liquid), 'currentValue');
-  const illiquidNAV = _.sumBy(enriched.filter(p => !p.liquid), 'currentValue');
-
-  // Sector breakdown
-  const bySector = _.groupBy(enriched, 'sectorId');
-  const sectorBreakdown = Object.entries(bySector).map(([sid, items]) => {
-    const s = sectorOf(sid);
-    const value = _.sumBy(items, 'currentValue');
-    return {
-      id: sid,
-      label: s.label,
-      color: s.color,
-      value,
-      pct: totalNAV > 0 ? (value / totalNAV) * 100 : 0,
-      count: items.length,
-    };
-  });
-  // Ensure all 5 GICS buckets appear even if 0
-  for (const s of SECTORS) {
-    if (!sectorBreakdown.find(x => x.id === s.id)) {
-      sectorBreakdown.push({ id: s.id, label: s.label, color: s.color, value: 0, pct: 0, count: 0 });
-    }
-  }
-  const sectorOrder = [...SECTORS.map(s=>s.id), 'unclassified'];
-  sectorBreakdown.sort((a, b) => sectorOrder.indexOf(a.id) - sectorOrder.indexOf(b.id));
-
-  // Token rollup — aggregate positions that share a ticker across managers
-  const byToken = {};
-  for (const p of enriched) {
-    const key = (p.ticker && p.ticker.toUpperCase()) || p.positionName;
-    if (!byToken[key]) {
-      byToken[key] = {
-        key,
-        cgTokenId: p.cgTokenId || null,
-        symbol: p.ticker || '',
-        name: p.positionName,
-        sectorId: p.sectorId,
-        value: 0, soiValue: 0, quantity: 0, cost: 0,
-        change24h: p.change24h, hasLivePrice: p.hasLivePrice, livePrice: p.livePrice,
-        managers: new Set(),
-        positions: [],
-        liquid: p.liquid, forceLiquid: p.forceLiquid,
-        throughFoF: false,
-      };
-    }
-    if (!byToken[key].cgTokenId && p.cgTokenId) byToken[key].cgTokenId = p.cgTokenId;
-    if (p.fromFoF) byToken[key].throughFoF = true;
-    const t = byToken[key];
-    t.value += p.currentValue || 0;
-    t.soiValue += p.soiMarketValue || 0;
-    t.quantity += p.quantity || 0;
-    t.cost += p.costBasis || 0;
-    t.managers.add(`${p.managerName} ${p.vintage}`);
-    t.positions.push(p);
-    if (p.hasLivePrice) { t.hasLivePrice = true; t.livePrice = p.livePrice; t.change24h = p.change24h; }
-    if (p.liquid) t.liquid = true;
-  }
-  const tokenRollup = Object.values(byToken).map(t => ({
-    ...t, managerCount: t.managers.size, managers: [...t.managers],
-    pct: totalNAV > 0 ? (t.value / totalNAV) * 100 : 0,
-  }));
-  tokenRollup.sort((a, b) => b.value - a.value);
-
-  // Concentration
-  const sortedByVal = [...tokenRollup];
-  const top10 = _.sumBy(sortedByVal.slice(0, 10), 'pct');
-  const top25 = _.sumBy(sortedByVal.slice(0, 25), 'pct');
-
-  // Manager breakdown
-  const byManager = _.groupBy(enriched, 'soiId');
-  const managerBreakdown = Object.entries(byManager).map(([soiId, items]) => {
-    const soi = soIs.find(s => s.id === soiId);
-    const manager = managerById[soi.managerId];
-    const value = _.sumBy(items, 'currentValue');
-    return {
-      soiId, managerId: soi.managerId, managerName: manager?.name, vintage: soi.vintage,
-      value, pct: totalNAV > 0 ? (value/totalNAV)*100 : 0,
-      positionCount: items.length,
-      asOfDate: latestSnapshot(soi)?.asOfDate,
-      _scale: items[0]?._scale ?? 1,
-    };
-  }).sort((a,b) => b.value - a.value);
-
-  return {
-    soIs, positions: enriched, tokenRollup, sectorBreakdown, managerBreakdown,
-    totalNAV, soiNAV, liquidNAV, illiquidNAV,
-    liquidPct: totalNAV > 0 ? (liquidNAV/totalNAV)*100 : 0,
-    top10, top25,
-    positionCount: enriched.length,
-    managerCount: new Set(enriched.map(p=>p.managerId)).size,
-    soiCount: soIs.length,
-    fofLookThroughCount,
-  };
-};
-
-/* =============================================================================
-   COINGECKO LIVE PRICES (by coin id, batch)
-   ============================================================================= */
-const CG_BASE = 'https://api.coingecko.com/api/v3';
-
-/* Embedded CoinGecko Demo API key.
-   The site ships with a key so users don't have to paste one into Settings.
-
-   Preferred: set VITE_COINGECKO_API_KEY in .env (local) and in your host's
-   environment variables (e.g. Vercel → Project → Settings → Environment
-   Variables). Vite inlines it at build time.
-
-   Fallback: replace the empty string below with a literal 'CG-xxxxxxxx' key.
-   Easier for a quick demo, but anyone who views the page source can read it.
-   For a public production deploy, proxy CoinGecko through a small backend
-   instead of shipping the key. */
-const EMBEDDED_CG_API_KEY =
-  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_COINGECKO_API_KEY) ||
-  'CG-7PkUvXxmyBFtFXTB7HJSkX5e';
-
-/* The effective key: a Settings-drawer override wins (useful if someone
-   wants to test a different key without a rebuild), otherwise the embedded one. */
-const resolveApiKey = (storeKey) => {
-  const trimmed = (storeKey || '').trim();
-  return trimmed || EMBEDDED_CG_API_KEY;
-};
-
-/* =============================================================================
-   CRYPTORANK API (market data endpoints only on demo tariff).
-   Fund / company / fundraising endpoints require a paid plan.
-   ============================================================================= */
-const CR_BASE = 'https://api.cryptorank.io/v2';
-const EMBEDDED_CR_API_KEY =
-  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_CRYPTORANK_API_KEY) ||
-  '82065ff0e0427de4c4a2d7cfb57e8e83f1ee76daf7d62557dce888814c01';
-
-/* Fetch helper. Returns { data, error }.  Wrapped for future endpoints once
-   the user upgrades the tariff and gets /v2/funds, /v2/companies, etc. */
-const cryptorankFetch = async (path) => {
-  try {
-    const res = await fetch(`${CR_BASE}${path}`, {
-      headers: { 'X-Api-Key': EMBEDDED_CR_API_KEY },
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      return { data: null, error: `CryptoRank ${res.status}: ${body.slice(0,200)}` };
-    }
-    return { data: await res.json(), error: null };
-  } catch (e) {
-    return { data: null, error: e?.message || 'network error' };
-  }
-};
-
-/* Shared context of ticker -> high-quality logo URL, fetched once from
-   CryptoRank and cached in localStorage so we only hit the API on first
-   browser load. TokenIcon pulls from this for its primary source. */
-const TokenImageContext = createContext({ crMap: {}, cmcIdMap: {} });
-const TOKEN_IMAGES_CACHE_KEY = 'catena.tokenImages.v2';
-const CMC_ID_CACHE_KEY = 'catena.cmcIds.v2';
-
-const loadTokenImagesCache = () => {
-  try {
-    const raw = localStorage.getItem(TOKEN_IMAGES_CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    // Expire after 7 days — images don't change often but we shouldn't cache forever.
-    if (!parsed?.savedAt || Date.now() - parsed.savedAt > 7 * 24 * 60 * 60 * 1000) return null;
-    return parsed.map || null;
-  } catch { return null; }
-};
-
-const saveTokenImagesCache = (map) => {
-  try { localStorage.setItem(TOKEN_IMAGES_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), map })); } catch {}
-};
-
-const loadCmcIdCache = () => {
-  try {
-    const raw = localStorage.getItem(CMC_ID_CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed?.savedAt || Date.now() - parsed.savedAt > 30 * 24 * 60 * 60 * 1000) return null;
-    return parsed.map || null;
-  } catch { return null; }
-};
-
-const saveCmcIdCache = (map) => {
-  try { localStorage.setItem(CMC_ID_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), map })); } catch {}
-};
-
-// Fetch up to 1000 tokens' metadata from CryptoRank and build a
-// { TICKER_UPPER: imageUrl } map. Uses at most 1 API credit per session.
-const fetchTokenImagesMap = async () => {
-  const { data, error } = await cryptorankFetch('/currencies?limit=1000');
-  if (error || !data?.data) return null;
-  const map = {};
-  for (const c of data.data) {
-    if (!c.symbol) continue;
-    const img = c.images?.x60 || c.images?.x150 || c.images?.icon || c.images?.native;
-    if (img) map[String(c.symbol).toUpperCase()] = img;
-  }
-  return map;
-};
-
-/* =============================================================================
-   COINMARKETCAP API (CORS open on Pro API; logo CDN is public).
-   The Pro API's /cryptocurrency/map endpoint gives ticker → CMC id mapping,
-   which we turn into logo URLs of the form:
-     https://s2.coinmarketcap.com/static/img/coins/64x64/{id}.png
-   ============================================================================= */
-const EMBEDDED_CMC_API_KEY =
-  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_COINMARKETCAP_API_KEY) ||
-  'a88a40ca0937478c9263d39a1fbf5a62';
-const CMC_IMG = (id) => `https://s2.coinmarketcap.com/static/img/coins/64x64/${id}.png`;
-// CoinMarketCap serves animated GIFs at the same path with a .gif extension
-// for a subset of top tokens (BTC, XRP, SOL, DOGE, etc.). Tokens without an
-// animated version respond 403, which onError catches and falls through to
-// the static PNG. Browser cache keeps it cheap on subsequent loads.
-const CMC_GIF = (id) => `https://s2.coinmarketcap.com/static/img/coins/64x64/${id}.gif`;
-
-const cmcFetch = async (path) => {
-  try {
-    const res = await fetch(`https://pro-api.coinmarketcap.com${path}`, {
-      headers: { 'X-CMC_PRO_API_KEY': EMBEDDED_CMC_API_KEY, 'Accept': 'application/json' },
-    });
-    if (!res.ok) return { data: null, error: `CMC ${res.status}` };
-    return { data: await res.json(), error: null };
-  } catch (e) {
-    return { data: null, error: e?.message || 'network error' };
-  }
-};
-
-// Fetch the top 5000 tokens from CMC's symbol→id map. Used once per browser.
-const fetchCmcIdMap = async () => {
-  const { data, error } = await cmcFetch('/v1/cryptocurrency/map?limit=5000&sort=cmc_rank');
-  if (error || !data?.data) return null;
-  const map = {};
-  for (const c of data.data) {
-    if (c.symbol && c.id && !map[String(c.symbol).toUpperCase()]) {
-      map[String(c.symbol).toUpperCase()] = c.id;
-    }
-  }
-  return map;
-};
-const fetchLivePrices = async (tokenIds, apiKey) => {
-  const ids = _.uniq(tokenIds).filter(Boolean);
-  if (!ids.length) return { prices: {}, error: null };
-  const withKey = (u) => apiKey ? u + (u.includes('?') ? '&' : '?') + `x_cg_demo_api_key=${encodeURIComponent(apiKey)}` : u;
-  const out = {};
-  const batches = _.chunk(ids, 100);
-  for (const batch of batches) {
-    try {
-      const url = `${CG_BASE}/simple/price?ids=${batch.join(',')}&vs_currencies=usd&include_24hr_change=true`;
-      const res = await fetch(withKey(url));
-      if (res.status === 401 || res.status === 403) return { prices: out, error: 'Invalid API key.' };
-      if (res.status === 429) return { prices: out, error: 'Rate limited (30 req/min on Demo).' };
-      if (!res.ok) return { prices: out, error: `CoinGecko returned ${res.status}.` };
-      const data = await res.json();
-      for (const [id, v] of Object.entries(data)) {
-        out[id] = { usd: v.usd, change24h: v.usd_24h_change ?? null };
-      }
-    } catch (e) {
-      return { prices: out, error: 'Network error.' };
-    }
-    await new Promise(r => setTimeout(r, 1200));
-  }
-  return { prices: out, error: null };
-};
-
-/* Historical prices: fetch up to N days of daily closes for a list of coin ids.
-   Returns { [coinId]: { [utcMidnightMs]: closePrice } }
-   Uses /coins/{id}/market_chart?vs_currency=usd&days=N&interval=daily
-   Rate-limited: ~2s between calls for Demo tier. */
-const fetchCoinDetail = async (cgTokenId, apiKey) => {
-  if (!cgTokenId) return { data: null, error: 'No CoinGecko ID for this token' };
-  const withKey = (u) => apiKey ? u + (u.includes('?') ? '&' : '?') + `x_cg_demo_api_key=${encodeURIComponent(apiKey)}` : u;
-  const url = `${CG_BASE}/coins/${encodeURIComponent(cgTokenId)}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
-  try {
-    const res = await fetch(withKey(url));
-    if (!res.ok) return { data: null, error: `CoinGecko ${res.status}` };
-    return { data: await res.json(), error: null };
-  } catch (e) { return { data: null, error: e?.message || 'Network error' }; }
-};
-
-const fetchCoinChart = async (cgTokenId, days, apiKey) => {
-  if (!cgTokenId) return { data: null, error: 'No CoinGecko ID' };
-  const withKey = (u) => apiKey ? u + (u.includes('?') ? '&' : '?') + `x_cg_demo_api_key=${encodeURIComponent(apiKey)}` : u;
-  const url = `${CG_BASE}/coins/${encodeURIComponent(cgTokenId)}/market_chart?vs_currency=usd&days=${days}`;
-  try {
-    const res = await fetch(withKey(url));
-    if (!res.ok) return { data: null, error: `CoinGecko ${res.status}` };
-    return { data: await res.json(), error: null };
-  } catch (e) { return { data: null, error: e?.message || 'Network error' }; }
-};
-
-const fetchHistory = async (tokenIds, days, apiKey, onProgress) => {
-  const ids = _.uniq(tokenIds).filter(Boolean);
-  if (!ids.length) return { history: {}, error: null };
-  const withKey = (u) => apiKey ? u + (u.includes('?') ? '&' : '?') + `x_cg_demo_api_key=${encodeURIComponent(apiKey)}` : u;
-  const out = {};
-  for (let i = 0; i < ids.length; i++) {
-    const id = ids[i];
-    try {
-      const url = `${CG_BASE}/coins/${id}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
-      const res = await fetch(withKey(url));
-      if (res.status === 401 || res.status === 403) return { history: out, error: 'Invalid API key.' };
-      if (res.status === 429) { await new Promise(r => setTimeout(r, 5000)); i--; continue; }
-      if (!res.ok) { onProgress?.(i + 1, ids.length, id, `HTTP ${res.status}`); continue; }
-      const data = await res.json();
-      const byDay = {};
-      for (const [ts, price] of (data.prices || [])) {
-        const dayKey = Math.floor(ts / 86400000) * 86400000;
-        byDay[dayKey] = price;
-      }
-      out[id] = byDay;
-      onProgress?.(i + 1, ids.length, id, null);
-    } catch (e) {
-      onProgress?.(i + 1, ids.length, id, 'network');
-    }
-    await new Promise(r => setTimeout(r, 2100));
-  }
-  return { history: out, error: null };
-};
-
-/* Build a NAV time series for a set of positions given priceHistory.
-   positions: [{quantity, soiMarketValue, acquisitionDate, cgTokenId, liquid}]
-   Returns [{date: ms, value: usd}] covering the requested range.
-   Used for ManagersTab sparklines. */
-const buildNAVSeriesSimple = (positions, priceHistory, startMs, endMs) => {
-  const dayMs = 86400000;
-  const start = Math.floor(startMs / dayMs) * dayMs;
-  const end = Math.floor(endMs / dayMs) * dayMs;
-
-  // Pre-fill each token's daily price by forward-filling gaps
-  const filledByToken = {};
-  for (const p of positions) {
-    if (!p.cgTokenId || !p.liquid) continue;
-    if (filledByToken[p.cgTokenId]) continue;
-    const byDay = priceHistory[p.cgTokenId];
-    if (!byDay) continue;
-    const filled = {};
-    let last = null;
-    for (let d = start; d <= end; d += dayMs) {
-      if (byDay[d] !== undefined) last = byDay[d];
-      filled[d] = last;
-    }
-    filledByToken[p.cgTokenId] = filled;
-  }
-
-  const series = [];
-  for (let d = start; d <= end; d += dayMs) {
-    let total = 0;
-    for (const p of positions) {
-      // Respect acquisition date — don't count position before it was held
-      const acqMs = p.acquisitionDate ? new Date(p.acquisitionDate).getTime() : null;
-      const acqDay = acqMs ? Math.floor(acqMs / dayMs) * dayMs : null;
-      if (acqDay && d < acqDay) continue;
-
-      if (p.liquid && p.cgTokenId && p.quantity) {
-        const filled = filledByToken[p.cgTokenId];
-        const price = filled?.[d];
-        if (price != null) total += p.quantity * price;
-        else total += p.soiMarketValue; // fallback to mark
-      } else {
-        // Illiquid or unpriced — held at SOI marked value
-        total += p.soiMarketValue;
-      }
-    }
-    series.push({ date: d, value: total });
-  }
-  return series;
-};
-
-/* Build a NAV time series for soiBundles (SOIs with snapshots).
-   Supports multiple snapshots per SOI — uses the latest snapshot active at each day.
-   Returns { series, earliestSnapshotMs, latestSnapshotMs, snapshotDates }. */
-const buildNAVSeries = (soiBundles, priceHistory, startMs, endMs, scaleFn = null) => {
-  const dayMs = 86400000;
-  const start = Math.floor(startMs / dayMs) * dayMs;
-  const end   = Math.floor(endMs   / dayMs) * dayMs;
-
-  // Collect snapshot boundary dates
-  let earliestSnapshotMs = Infinity, latestSnapshotMs = -Infinity;
-  const snapshotDateSet = new Set();
-  for (const bundle of soiBundles) {
-    for (const snap of snapshotsOf(bundle)) {
-      if (!snap.asOfDate) continue;
-      const ms = new Date(snap.asOfDate + 'T00:00:00Z').getTime();
-      if (isNaN(ms)) continue;
-      if (ms < earliestSnapshotMs) earliestSnapshotMs = ms;
-      if (ms > latestSnapshotMs)   latestSnapshotMs   = ms;
-      snapshotDateSet.add(ms);
-    }
-  }
-  if (earliestSnapshotMs === Infinity)  earliestSnapshotMs = null;
-  if (latestSnapshotMs   === -Infinity) latestSnapshotMs   = null;
-
-  // Pre-fill price history for all tokens used in any snapshot
-  const filledByToken = {};
-  for (const bundle of soiBundles) {
-    for (const snap of snapshotsOf(bundle)) {
-      for (const p of (snap.positions || [])) {
-        if (!p.cgTokenId || !isLiquid(p) || filledByToken[p.cgTokenId]) continue;
-        const byDay = priceHistory[p.cgTokenId];
-        if (!byDay) continue;
-        const filled = {}; let last = null;
-        for (let d = start; d <= end; d += dayMs) {
-          if (byDay[d] !== undefined) last = byDay[d];
-          filled[d] = last;
-        }
-        filledByToken[p.cgTokenId] = filled;
-      }
-    }
-  }
-
-  const series = [];
-  for (let d = start; d <= end; d += dayMs) {
-    const dStr = new Date(d).toISOString().slice(0, 10);
-    let total = 0;
-    for (const bundle of soiBundles) {
-      const scale = scaleFn ? (scaleFn(bundle) ?? 1) : 1;
-      const snaps = sortedSnapshots(bundle);
-      if (!snaps.length) continue;
-      // pick latest snapshot whose asOfDate <= dStr
-      let bestSnap = snaps[0];
-      for (const snap of snaps) {
-        if ((snap.asOfDate || '') <= dStr) bestSnap = snap;
-        else break;
-      }
-      let bundleTotal = 0;
-      for (const p of (bestSnap.positions || [])) {
-        const acqMs  = p.acquisitionDate ? new Date(p.acquisitionDate).getTime() : null;
-        const acqDay = acqMs ? Math.floor(acqMs / dayMs) * dayMs : null;
-        if (acqDay && d < acqDay) continue;
-        if (isLiquid(p) && p.cgTokenId && p.quantity) {
-          const price = filledByToken[p.cgTokenId]?.[d];
-          bundleTotal += price != null ? p.quantity * price : p.soiMarketValue;
-        } else {
-          bundleTotal += p.soiMarketValue || 0;
-        }
-      }
-      total += bundleTotal * scale;
-    }
-    series.push({ date: d, value: total });
-  }
-
-  return {
-    series,
-    earliestSnapshotMs,
-    latestSnapshotMs,
-    snapshotDates: [...snapshotDateSet].sort((a, b) => a - b),
-  };
-};
-
-const rangeToStartMs = (rangeId, positions) => {
-  const now = Date.now();
-  const dayMs = 86400000;
-  if (rangeId === '1D') return now - dayMs;
-  if (rangeId === 'MTD') {
-    const d = new Date(); d.setUTCDate(1); d.setUTCHours(0,0,0,0);
-    return d.getTime();
-  }
-  if (rangeId === 'YTD') {
-    const d = new Date(); d.setUTCMonth(0, 1); d.setUTCHours(0,0,0,0);
-    return d.getTime();
-  }
-  if (rangeId === '1Y') return now - 365 * dayMs;
-  if (rangeId === '5Y') return now - 5 * 365 * dayMs;
-  if (rangeId === 'SI') {
-    // Since earliest acquisition date in the selection
-    const dates = positions.map(p => p.acquisitionDate ? new Date(p.acquisitionDate).getTime() : null).filter(Boolean);
-    return dates.length ? Math.min(...dates) : (now - 365 * dayMs);
-  }
-  return now - 30 * dayMs;
-};
-const rangeToDays = (rangeId, positions) => {
-  const startMs = rangeToStartMs(rangeId, positions);
-  return Math.max(2, Math.ceil((Date.now() - startMs) / 86400000));
-};
 
 /* =============================================================================
    SHARED UI PRIMITIVES
@@ -1339,24 +307,7 @@ const TokenIcon = ({ ticker, name, size = 20 }) => {
   );
 };
 
-const OpenTokenDetailContext = createContext(() => {});
 
-const MOVER_RANGES = [
-  { id: '1D',  label: '1D'  },
-  { id: 'MTD', label: 'MTD' },
-  { id: 'YTD', label: 'YTD' },
-  { id: '1Y',  label: '1Y'  },
-  { id: '5Y',  label: '5Y'  },
-];
-
-const DETAIL_RANGES = [
-  { id: '1',   label: '24h' },
-  { id: '7',   label: '7D'  },
-  { id: '30',  label: '1M'  },
-  { id: '90',  label: '3M'  },
-  { id: '365', label: '1Y'  },
-  { id: 'max', label: 'All' },
-];
 
 function TokenDetailDrawer({ token, onClose, apiKey, store }) {
   const [coin, setCoin] = useState(null);
@@ -1788,12 +739,12 @@ export default function SOIDashboard() {
     if (loaded && (loaded.soIs.length || loaded.clients.length)) return loaded;
     return seedStore();
   });
-  // Sync module-level SECTORS ref to the live store list before any child render / useMemo.
+  // Sync lib/sectors module-level ref to the live store list before any child render / useMemo.
   // If stored sectors lack the v5 'base-layer' bucket (e.g. HMR preserved an
   // older store in memory), force-use DEFAULT_SECTORS so breakdown labels and
   // colors reflect the current taxonomy regardless of persisted state.
   const _storedSectorsValid = store.sectors && store.sectors.length && store.sectors.some(sec => sec && sec.id === 'base-layer');
-  SECTORS = _storedSectorsValid ? store.sectors : DEFAULT_SECTORS;
+  setSectors(_storedSectorsValid ? store.sectors : DEFAULT_SECTORS);
   useEffect(() => { saveStore(store); }, [store]);
 
   // Top-level navigation: selection + tab
@@ -3852,7 +2803,7 @@ function PositionsTab({ rollup, store, updateStore }) {
           className="text-xs px-2 py-1 rounded outline-none"
           style={{ backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}` }}>
           <option value="all">All sectors</option>
-          {SECTORS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          {getSectors().map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           <option value="unclassified">Unclassified</option>
         </select>
         <select value={liquidityFilter} onChange={e=>setLiquidityFilter(e.target.value)}
@@ -3892,7 +2843,7 @@ function PositionsTab({ rollup, store, updateStore }) {
                     <select value={t.sectorId} onChange={e=>changeSector(t.key, e.target.value)}
                       className="text-xs px-1.5 py-0.5 rounded outline-none"
                       style={{ backgroundColor: 'transparent', color: sectorOf(t.sectorId).color, border: `1px solid ${sectorOf(t.sectorId).color}44` }}>
-                      {SECTORS.map(s => <option key={s.id} value={s.id} style={{backgroundColor:PANEL, color:TEXT}}>{s.label}</option>)}
+                      {getSectors().map(s => <option key={s.id} value={s.id} style={{backgroundColor:PANEL, color:TEXT}}>{s.label}</option>)}
                       <option value="unclassified" style={{backgroundColor:PANEL, color:TEXT}}>Unclassified</option>
                     </select>
                   </td>
@@ -3973,7 +2924,7 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
   const illiquidNAV = _.sumBy(rows.filter(r=>!r.liquid), 'currentValue');
 
   const bySector = _.groupBy(rows, 'sectorId');
-  const sectorData = SECTORS.map(s => {
+  const sectorData = getSectors().map(s => {
     const items = bySector[s.id] || [];
     const v = _.sumBy(items, 'currentValue');
     return { id: s.id, label: s.label, color: s.color, value: v, pct: totalNAV>0?(v/totalNAV)*100:0, count: items.length };
@@ -4451,7 +3402,7 @@ function PositionEditor({ mode, position, onCancel, onSave }) {
           </Field>
           <Field label="Sector">
             <Select value={form.sectorId} onChange={v=>set('sectorId', v)} options={[
-              ...SECTORS.map(s => ({value: s.id, label: s.label})),
+              ...getSectors().map(s => ({value: s.id, label: s.label})),
               {value: 'unclassified', label: 'Unclassified'},
             ]} />
           </Field>
@@ -4673,7 +3624,7 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
       let sectorId = UNCLASSIFIED.id;
       if (sector) {
         const n = normalize(sector);
-        const match = SECTORS.find(s => n.includes(s.id) || s.label.toLowerCase().includes(n) || n.includes(s.label.toLowerCase()));
+        const match = getSectors().find(s => n.includes(s.id) || s.label.toLowerCase().includes(n) || n.includes(s.label.toLowerCase()));
         if (match) sectorId = match.id;
       }
       if (sectorId === UNCLASSIFIED.id && ticker) {
@@ -5006,7 +3957,7 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
                         <td className="px-1 py-1">
                           <select value={p.sectorId} onChange={e=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,sectorId:e.target.value}:x))}
                             className="px-1 py-1 rounded text-xs outline-none" style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}}>
-                            {SECTORS.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
+                            {getSectors().map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
                             <option value="unclassified">Unclassified</option>
                           </select>
                         </td>
