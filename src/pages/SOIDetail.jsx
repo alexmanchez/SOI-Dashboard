@@ -67,6 +67,41 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
   const liquidNAV = _.sumBy(rows.filter(r=>r.liquid), 'currentValue');
   const illiquidNAV = _.sumBy(rows.filter(r=>!r.liquid), 'currentValue');
 
+  // Minimal rollup object for shared panels (LiquidityBreakdownPanel, TopMoversPanel).
+  const fundRollup = useMemo(() => {
+    const enriched = rows.map(r => ({ ...r, managerName: manager?.name, vintage: soi.vintage, soiId: soi.id }));
+    const byTok = {};
+    for (const p of enriched) {
+      const key = (p.ticker && p.ticker.toUpperCase()) || p.positionName;
+      if (!byTok[key]) {
+        byTok[key] = {
+          key, symbol: p.ticker || '', name: p.positionName,
+          cgTokenId: p.cgTokenId || null, sectorId: p.sectorId,
+          value: 0, soiValue: 0, quantity: 0, cost: 0,
+          change24h: p.change24h, hasLivePrice: p.hasLivePrice, livePrice: p.livePrice,
+          managers: new Set(), positions: [], liquid: p.liquid,
+        };
+      }
+      const t = byTok[key];
+      t.value += p.currentValue || 0;
+      t.soiValue += p.soiMarketValue || 0;
+      t.quantity += p.quantity || 0;
+      t.cost += p.costBasis || 0;
+      t.managers.add(`${manager?.name || '?'} ${soi.vintage}`);
+      t.positions.push(p);
+      if (p.liquid) t.liquid = true;
+    }
+    const tokenRollup = Object.values(byTok).map(t => ({
+      ...t, managers: [...t.managers], managerCount: t.managers.size,
+      pct: totalNAV > 0 ? (t.value / totalNAV) * 100 : 0,
+    })).sort((a, b) => b.value - a.value);
+    return {
+      positions: enriched, tokenRollup,
+      totalNAV, liquidNAV, illiquidNAV,
+      liquidPct: totalNAV > 0 ? (liquidNAV / totalNAV) * 100 : 0,
+    };
+  }, [rows, manager, soi, totalNAV, liquidNAV, illiquidNAV]);
+
   const bySector = _.groupBy(rows, 'sectorId');
   const sectorData = getSectors().map(s => {
     const items = bySector[s.id] || [];
@@ -355,6 +390,15 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
           ))}
         </div>
       </Panel>
+
+      {/* Fund-scoped movers + liquidity (replaces the self-referential
+          "exposure by vintage" panel that would just restate this fund). */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2">
+          <TopMoversPanel rollup={fundRollup} priceHistory={priceHistory} />
+        </div>
+        <LiquidityBreakdownPanel rollup={fundRollup} />
+      </div>
 
       {/* Positions table */}
       <Panel className="p-0 overflow-hidden">
