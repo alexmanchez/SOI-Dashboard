@@ -1,51 +1,63 @@
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import {
+  useMemo, useState,
+} from 'react';
 import _ from 'lodash';
 import {
-  ArrowLeft, X, Check, Plus, Trash2, RefreshCw,
-  Calendar, ChevronDown, ChevronRight,
+  ArrowLeft, Trash2, RefreshCw,
 } from 'lucide-react';
 
 import {
-  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
+  PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT_2, RED, GOLD,
 } from '../lib/theme';
-import { fmtCurrency, fmtPct, fmtPctSigned, fmtNum, fmtMoic, fundLabel, uid, today } from '../lib/format';
-import { getSectors, sectorOf, resolveSector } from '../lib/sectors';
-import { RANGES } from '../lib/ranges';
+import {
+  fmtCurrency, fmtPct, fmtMoic, fundLabel, uid,
+} from '../lib/format';
+import {
+  getSectors, resolveSector,
+} from '../lib/sectors';
 import {
   snapshotsOf, latestSnapshot, sortedSnapshots, isLiquid, liquidityOverrideOf,
 } from '../lib/snapshots';
-import { OpenTokenDetailContext } from '../contexts';
 
 import {
-  Panel, Pill, EditableText, EditableNumber, EditableSelect,
-  SectorBadge, LiquidityBadge, ChangeCell, SortHead,
-  ManagerSocials, KPI, NumField, Stat,
+  Panel, ChangeCell, KPI, NumField, Stat,
 } from '../components/ui';
-import { TokenIcon } from '../components/TokenIcon';
-import { PerformanceChart } from '../components/PerformanceChart';
 import {
-  CompactSectorTilt, TopHoldingsPanel, TopMoversPanel,
-  LiquidityBreakdownPanel,
+  PerformanceChart,
+} from '../components/PerformanceChart';
+import {
+  TopMoversPanel, LiquidityBreakdownPanel,
 } from '../components/DashboardPanels';
 import { PositionEditor } from './PositionEditor';
 import { ImportWizard } from '../import/ImportWizard';
+import { PositionGrid } from '../components/PositionGrid';
 
 export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey }) {
   const soi = store.soIs.find(s => s.id === soiId);
   const manager = store.managers.find(m => m.id === soi?.managerId);
   const [editingPosition, setEditingPosition] = useState(null); // {mode: 'add'|'edit', position?}
   const [updatingSOI, setUpdatingSOI] = useState(false);
+  const [gridEditMode, setGridEditMode] = useState(false);
 
   const snaps = soi ? sortedSnapshots(soi) : [];
   const [selectedSnapId, setSelectedSnapId] = useState(() => latestSnapshot(soi)?.id ?? null);
-  useEffect(() => { setSelectedSnapId(latestSnapshot(soi)?.id ?? null); }, [soiId]);
+  // Reset the selected snapshot when the user drills into a different fund.
+  // setState-during-render (React's blessed pattern for prop-keyed resets)
+  // instead of useEffect so we don't trip set-state-in-effect.
+  const [_prevSoiId, _setPrevSoiId] = useState(soiId);
+  if (soiId !== _prevSoiId) {
+    _setPrevSoiId(soiId);
+    setSelectedSnapId(latestSnapshot(soi)?.id ?? null);
+  }
 
-  if (!soi) return null;
+  const selectedSnap = soi
+    ? (snaps.find(s => s.id === selectedSnapId) || latestSnapshot(soi) || snaps[0])
+    : null;
 
-  const selectedSnap = snaps.find(s => s.id === selectedSnapId) || latestSnapshot(soi) || snaps[0];
-
-  // Build enriched positions for this one SOI
+  // Build enriched positions for this one SOI.
+  // Store objects (selectedSnap) are updated immutably via updateStore, so
+  // reference equality on the deps correctly triggers re-memoization. The
+  // compiler can't verify that, so we suppress its pre-optimization bailout.
   const rows = useMemo(() => {
     return (selectedSnap?.positions || []).map(p => {
       const sectorId = resolveSector(p, store.sectorOverrides);
@@ -60,6 +72,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
         hasLivePrice: useLive,
       };
     });
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- see comment above
   }, [selectedSnap, store.sectorOverrides, livePrices]);
 
   const totalNAV = _.sumBy(rows, 'currentValue');
@@ -68,8 +81,10 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
   const illiquidNAV = _.sumBy(rows.filter(r=>!r.liquid), 'currentValue');
 
   // Minimal rollup object for shared panels (LiquidityBreakdownPanel, TopMoversPanel).
+  // Same immutable-update guarantee as above: `soi` only changes reference
+  // when the store is updated via updateStore, which shallow-copies it.
   const fundRollup = useMemo(() => {
-    const enriched = rows.map(r => ({ ...r, managerName: manager?.name, vintage: soi.vintage, soiId: soi.id }));
+    const enriched = rows.map(r => ({ ...r, managerName: manager?.name, vintage: soi?.vintage, soiId: soi?.id }));
     const byTok = {};
     for (const p of enriched) {
       const key = (p.ticker && p.ticker.toUpperCase()) || p.positionName;
@@ -87,7 +102,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
       t.soiValue += p.soiMarketValue || 0;
       t.quantity += p.quantity || 0;
       t.cost += p.costBasis || 0;
-      t.managers.add(`${manager?.name || '?'} ${soi.vintage}`);
+      t.managers.add(`${manager?.name || '?'} ${soi?.vintage ?? ''}`);
       t.positions.push(p);
       if (p.liquid) t.liquid = true;
     }
@@ -100,7 +115,10 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
       totalNAV, liquidNAV, illiquidNAV,
       liquidPct: totalNAV > 0 ? (liquidNAV / totalNAV) * 100 : 0,
     };
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- see comment above
   }, [rows, manager, soi, totalNAV, liquidNAV, illiquidNAV]);
+
+  if (!soi) return null;
 
   const bySector = _.groupBy(rows, 'sectorId');
   const sectorData = getSectors().map(s => {
@@ -161,6 +179,43 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
         ),
       }),
     }));
+  };
+
+  /* Append a blank row to the selected snapshot and return its id so the
+     grid can focus the new row's first cell. */
+  const addBlankPosition = () => {
+    const newId = uid();
+    updateStore(s => ({
+      ...s,
+      soIs: s.soIs.map(x => x.id !== soiId ? x : {
+        ...x,
+        snapshots: snapshotsOf(x).map(snap =>
+          snap.id !== selectedSnapId ? snap : {
+            ...snap,
+            positions: [...snap.positions, {
+              id: newId,
+              positionName: '',
+              ticker: '',
+              quantity: null,
+              soiPrice: null,
+              soiMarketValue: 0,
+              costBasis: null,
+              acquisitionDate: null,
+              assetType: 'Liquid Token',
+              sectorId: 'unclassified',
+              forceLiquid: false,
+              cgTokenId: null,
+              chain: null,
+              address: null,
+              notes: '',
+              lockup: '',
+              valuationMethod: '',
+            }],
+          }
+        ),
+      }),
+    }));
+    return newId;
   };
 
   const savePosition = (payload) => {
@@ -400,156 +455,25 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
         <LiquidityBreakdownPanel rollup={fundRollup} />
       </div>
 
-      {/* Positions table */}
-      <Panel className="p-0 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3" style={{borderBottom: `1px solid ${BORDER}`}}>
-          <div className="text-sm font-semibold">Positions</div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setUpdatingSOI(true)}
-              className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
-              style={{color: TEXT, backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
-              <RefreshCw size={12} /> Update holdings
-            </button>
-            <button onClick={() => setEditingPosition({ mode: 'add' })}
-              className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
-              style={{backgroundColor: ACCENT, color: BG}}>
-              <Plus size={12} /> Add position
-            </button>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ color: TEXT_MUTE, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${BORDER}` }}>
-                <th className="text-left px-3 py-2">Position</th>
-                <th className="text-left px-3 py-2">Sector</th>
-                <th className="text-right px-3 py-2">Qty</th>
-                <th className="text-right px-3 py-2">Snap Px</th>
-                <th className="text-right px-3 py-2">Live Px</th>
-                <th className="text-right px-3 py-2">24h</th>
-                <th className="text-right px-3 py-2">Cost</th>
-                <th className="text-right px-3 py-2">Value</th>
-                <th className="text-right px-3 py-2">P&amp;L $</th>
-                <th className="text-right px-3 py-2">P&amp;L %</th>
-                <th className="text-right px-3 py-2">% NAV</th>
-                <th className="text-right px-3 py-2">Liquidity</th>
-                <th className="text-right px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {_.orderBy(rows, 'currentValue', 'desc').map(p => {
-                const pct = totalNAV>0 ? (p.currentValue/totalNAV)*100 : 0;
-                const plDollars = p.costBasis != null ? p.currentValue - p.costBasis : null;
-                const plPct = (p.costBasis != null && p.costBasis !== 0) ? (plDollars / p.costBasis) * 100 : null;
-                const override = liquidityOverrideOf(p);
-                return (
-                  <tr key={p.id} style={{borderBottom: `1px solid ${BORDER}`}}>
-                    <td className="px-3 py-2.5">
-                      <EditableText
-                        value={p.positionName}
-                        onCommit={(v) => updatePositionField(p.id, 'positionName', v)}
-                        className="font-medium"
-                        placeholder="Position name"
-                      />
-                      <div className="text-[10px]" style={{color:TEXT_MUTE}}>
-                        <EditableText
-                          value={p.ticker || ''}
-                          onCommit={(v) => updatePositionField(p.id, 'ticker', v.toUpperCase())}
-                          placeholder="ticker"
-                        />
-                        {p.assetType && <span> • {p.assetType}</span>}
-                        {' • '}
-                        <EditableText
-                          value={p.acquisitionDate ? String(p.acquisitionDate).slice(0,10) : ''}
-                          onCommit={(v) => updatePositionField(p.id, 'acquisitionDate', v)}
-                          placeholder="YYYY-MM-DD"
-                        />
-                      </div>
-                      {p.notes && <div className="text-[10px] mt-0.5" style={{color:TEXT_DIM}}>{p.notes}</div>}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <EditableSelect
-                        value={p.sectorId || 'unclassified'}
-                        onCommit={(v) => updatePositionField(p.id, 'sectorId', v)}
-                        options={[
-                          ...getSectors().map(s => ({ value: s.id, label: s.label })),
-                          { value: 'unclassified', label: 'Unclassified' },
-                        ]}
-                        renderValue={(v) => <SectorBadge sectorId={v} />}
-                      />
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums" style={{color: p.quantity ? TEXT : TEXT_MUTE}}>
-                      <EditableNumber
-                        value={p.quantity ?? null}
-                        onCommit={(v) => updatePositionField(p.id, 'quantity', v)}
-                        format={(v) => (v ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—')}
-                        placeholder="—"
-                      />
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums" style={{color:TEXT_DIM}}>
-                      <EditableNumber
-                        value={p.soiPrice ?? null}
-                        onCommit={(v) => updatePositionField(p.id, 'soiPrice', v)}
-                        format={(v) => (v ? '$' + v.toLocaleString(undefined, { maximumFractionDigits: 4 }) : '—')}
-                        placeholder="—"
-                      />
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
-                      {p.livePrice ? <span style={{color:GREEN}}>${p.livePrice.toLocaleString(undefined,{maximumFractionDigits: 4})}</span> : <span style={{color:TEXT_MUTE}}>—</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums"><ChangeCell value={p.change24h} /></td>
-                    <td className="px-3 py-2.5 text-right tabular-nums" style={{color:TEXT_DIM}}>
-                      <EditableNumber
-                        value={p.costBasis ?? null}
-                        onCommit={(v) => updatePositionField(p.id, 'costBasis', v)}
-                        format={(v) => (v != null ? fmtCurrency(v) : '—')}
-                        placeholder="—"
-                      />
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums font-medium">
-                      <EditableNumber
-                        value={p.soiMarketValue ?? null}
-                        onCommit={(v) => updatePositionField(p.id, 'soiMarketValue', v)}
-                        format={(v) => fmtCurrency(v)}
-                      />
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
-                      {plDollars != null ? <ChangeCell value={plDollars} format="currency" /> : <span style={{color:TEXT_MUTE}}>—</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
-                      {plPct != null ? <ChangeCell value={plPct} /> : <span style={{color:TEXT_MUTE}}>—</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{fmtPct(pct,2)}</td>
-                    <td className="px-3 py-2.5 text-right">
-                      <button onClick={()=>cycleLiquidity(p.id)}
-                        className="text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-1"
-                        style={{
-                          backgroundColor: p.liquid ? GREEN+'22' : GOLD+'22',
-                          color: p.liquid ? GREEN : GOLD,
-                          border: `1px solid ${p.liquid ? GREEN+'44' : GOLD+'44'}`,
-                        }}
-                        title={
-                          override === 'auto' ? 'Click to override (next: ' + (p.liquid ? 'Illiquid' : 'Liquid') + ')' :
-                          override === 'liquid' ? 'Forced liquid. Click for Illiquid.' :
-                          'Forced illiquid. Click to reset to auto.'
-                        }>
-                        {p.liquid ? 'Liquid' : 'Illiquid'}
-                        {override !== 'auto' && <Check size={10} />}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <button onClick={()=>deletePosition(p.id)}
-                        className="p-1 rounded" style={{color:TEXT_DIM}} title="Delete">
-                        <Trash2 size={12} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
+      {/* Positions grid (spreadsheet-style editor; see components/PositionGrid) */}
+      <PositionGrid
+        positions={rows}
+        editMode={gridEditMode}
+        onToggleEdit={setGridEditMode}
+        onField={updatePositionField}
+        onDelete={deletePosition}
+        onAdd={addBlankPosition}
+        onCycleLiquidity={cycleLiquidity}
+        totalNAV={totalNAV}
+        headerExtras={
+          <button onClick={() => setUpdatingSOI(true)}
+            className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
+            style={{color: TEXT, backgroundColor: PANEL_2, border: `1px solid ${BORDER}`}}>
+            <RefreshCw size={12} /> Update holdings
+          </button>
+        }
+      />
+
 
       {editingPosition && (
         <PositionEditor

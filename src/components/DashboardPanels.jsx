@@ -1,22 +1,21 @@
-import React, { useContext, useMemo, useState } from 'react';
+import {
+  useContext, useMemo, useState,
+} from 'react';
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
 } from 'recharts';
-import { TrendingUp, ChevronRight } from 'lucide-react';
 
 import {
-  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
+  PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
 } from '../lib/theme';
 import { fmtCurrency, fmtPct, fmtPctSigned } from '../lib/format';
-import { getSectors, sectorOf } from '../lib/sectors';
 import { MOVER_RANGES, rangeToStartMs } from '../lib/ranges';
-import { isLiquid } from '../lib/snapshots';
 import { OpenTokenDetailContext } from '../contexts';
 
-import { Panel, Pill, SectorBadge, LiquidityBadge, ChangeCell, ManagerSocials } from './ui';
+import {
+  Panel, SectorBadge, LiquidityBadge, ChangeCell,
+} from './ui';
 import { TokenIcon } from './TokenIcon';
-import { MiniSparkline } from './MiniSparkline';
 
 export const CompactSectorTilt = ({ breakdown }) => (
   <Panel className="p-4">

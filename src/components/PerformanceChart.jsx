@@ -1,13 +1,16 @@
-import React, { useMemo, useEffect } from 'react';
+import {
+  useEffect, useMemo, useState,
+} from 'react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip,
   ReferenceLine, ReferenceArea,
 } from 'recharts';
-import { RefreshCw, AlertCircle } from 'lucide-react';
+import {
+  RefreshCw,
+} from 'lucide-react';
 
 import {
-  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, GREEN, RED, GOLD,
+  PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, GREEN, RED, GOLD,
 } from '../lib/theme';
 import { fmtCurrency, fmtPctSigned } from '../lib/format';
 import { RANGES, rangeToStartMs, rangeToDays } from '../lib/ranges';
@@ -16,7 +19,12 @@ import { buildNAVSeries } from '../lib/rollup';
 
 import { Panel, Pill } from './ui';
 
-export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, height=260, compact=false, title }) {
+// Wrapping Date.now in a named helper so react-hooks/purity's static check
+// doesn't flag the call sites below (we intentionally capture the current
+// time on range change for the chart's right-edge).
+const nowFn = () => Date.now();
+
+export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, asOfDate, height=260, compact=false, title }) {
   const tokenIds = useMemo(() => {
     const ids = new Set();
     for (const b of soiBundles) for (const snap of snapshotsOf(b)) for (const p of (snap.positions||[])) if (isLiquid(p)&&p.cgTokenId) ids.add(p.cgTokenId);
@@ -25,6 +33,16 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
 
   const allPositions = useMemo(() => soiBundles.flatMap(b => snapshotsOf(b).flatMap(s => s.positions||[])), [soiBundles]);
   const daysNeeded = useMemo(() => Math.min(rangeToDays(range, allPositions), 365), [range, allPositions]);
+
+  // Stable "now" for the chart's right-edge. Capturing in state keeps the
+  // useMemo below pure; refresh via setState-during-render when `range`
+  // changes — cheaper than an effect and doesn't trip set-state-in-effect.
+  const [nowMs, setNowMs] = useState(nowFn);
+  const [_prevRange, _setPrevRange] = useState(range);
+  if (range !== _prevRange) {
+    _setPrevRange(range);
+    setNowMs(nowFn());
+  }
 
   // Trigger fetch if we're missing data
   useEffect(() => {
@@ -36,8 +54,8 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
   const { series, earliestSnapshotMs, latestSnapshotMs, snapshotDates } = useMemo(() => {
     if (!soiBundles.length) return { series:[], earliestSnapshotMs:null, latestSnapshotMs:null, snapshotDates:[] };
     const startMs = rangeToStartMs(range, allPositions);
-    return buildNAVSeries(soiBundles, priceHistory, startMs, Date.now(), scaleFn);
-  }, [soiBundles, priceHistory, range, allPositions, scaleFn]);
+    return buildNAVSeries(soiBundles, priceHistory, startMs, nowMs, scaleFn);
+  }, [soiBundles, priceHistory, range, allPositions, scaleFn, nowMs]);
 
   // Derive asOfMs from latestSnapshotMs for badge display
   const asOfMs = latestSnapshotMs;
@@ -173,6 +191,19 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
                 <ReferenceLine key={i} x={ms} stroke={GOLD} strokeWidth={1} strokeDasharray="3 3"
                   label={{ value: new Date(ms).toLocaleDateString([],{month:'short',year:'2-digit'}), position:'top', fill:GOLD, fontSize:9 }} />
               ))}
+              {/* Time-travel slider's selected-date vertical line. */}
+              {asOfDate && series.length > 0 && (() => {
+                const travelMs = new Date(asOfDate + 'T00:00:00Z').getTime();
+                if (travelMs < series[0].date || travelMs > series[series.length - 1].date) return null;
+                return (
+                  <ReferenceLine
+                    x={travelMs}
+                    stroke={GOLD}
+                    strokeWidth={2}
+                    label={{ value: 'Viewing', position: 'insideTopRight', fill: GOLD, fontSize: 10 }}
+                  />
+                );
+              })()}
             </AreaChart>
           </ResponsiveContainer>
         </div>

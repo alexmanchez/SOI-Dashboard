@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import {
+  useEffect, useMemo, useState,
+} from 'react';
 import {
   RefreshCw, X, Globe, Twitter, ExternalLink, Maximize2, Minimize2,
 } from 'lucide-react';
@@ -7,8 +9,7 @@ import {
 } from 'recharts';
 
 import {
-  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT_2, GREEN, RED,
+  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, GREEN, RED,
 } from '../lib/theme';
 import { fmtCurrency, fmtNum, fmtPctSigned, fundLabel } from '../lib/format';
 import { latestSnapshot } from '../lib/snapshots';
@@ -42,13 +43,19 @@ export function TokenDetailDrawer({ token, onClose, apiKey, store }) {
   }, [expanded, token?.cgTokenId]);
 
   useEffect(() => {
+    // When token has no cgTokenId we surface an inline error; when it does,
+    // we synchronously mark loading before kicking off the fetch. Both are
+    // "sync external data" flows — the React-blessed alternative (deriving
+    // loading/error from props) would duplicate the state machine.
     if (!token?.cgTokenId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
       setError('This position has no CoinGecko ID linked.');
       setLoading(false);
       return;
     }
     let cancelled = false;
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
     (async () => {
       const [coinRes, chartRes] = await Promise.all([
         fetchCoinDetail(token.cgTokenId, apiKey),
@@ -66,6 +73,7 @@ export function TokenDetailDrawer({ token, onClose, apiKey, store }) {
   useEffect(() => {
     if (!token?.cgTokenId || range === '365') return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pre-fetch spinner
     setChartLoading(true);
     (async () => {
       const r = await fetchCoinChart(token.cgTokenId, range, apiKey);

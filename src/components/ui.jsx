@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-  Home, Users, Briefcase, Layers, ChevronRight, ChevronDown,
-  Globe, Twitter, Linkedin, ExternalLink, X,
+  Home, Users, Briefcase, ChevronRight, ChevronDown, Globe, Twitter, Linkedin, ExternalLink, X,
 } from 'lucide-react';
 
 import {
@@ -166,7 +165,13 @@ export const ManagerSocials = ({ socials }) => {
 export const EditableText = ({ value, onCommit, placeholder, className, style, tag = 'span' }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value || '');
-  useEffect(() => { if (!editing) setDraft(value || ''); }, [value, editing]);
+  // Resync draft when the controlled `value` changes externally and we're
+  // not mid-edit. setState-during-render (React's prop-reset pattern).
+  const [_lastValue, _setLastValue] = useState(value || '');
+  if (!editing && (value || '') !== _lastValue) {
+    _setLastValue(value || '');
+    setDraft(value || '');
+  }
 
   const commit = () => {
     setEditing(false);
@@ -237,9 +242,13 @@ export const EditableNumber = ({
 }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value == null ? '' : String(value));
-  useEffect(() => {
-    if (!editing) setDraft(value == null ? '' : String(value));
-  }, [value, editing]);
+  // Resync draft when controlled `value` changes externally and not editing.
+  const _canonical = value == null ? '' : String(value);
+  const [_lastValue, _setLastValue] = useState(_canonical);
+  if (!editing && _canonical !== _lastValue) {
+    _setLastValue(_canonical);
+    setDraft(_canonical);
+  }
 
   const commit = () => {
     setEditing(false);
@@ -456,7 +465,13 @@ export function TextInput({ value, onChange, placeholder, type='text', align }) 
 
 export function NumField({ label, value, onSave }) {
   const [text, setText] = useState(String(value ?? ''));
-  useEffect(() => { setText(String(value ?? '')); }, [value]);
+  // Resync when controlled `value` changes (e.g. after save confirms from store).
+  const _canonical = String(value ?? '');
+  const [_lastValue, _setLastValue] = useState(_canonical);
+  if (_canonical !== _lastValue) {
+    _setLastValue(_canonical);
+    setText(_canonical);
+  }
   const commit = () => {
     const n = parseNum(text);
     if (n == null) { setText(String(value ?? '')); return; }

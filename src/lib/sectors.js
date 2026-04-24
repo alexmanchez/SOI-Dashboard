@@ -53,7 +53,26 @@ export const DEFAULT_TOKEN_SECTOR = {
   'ETHFI': 'staking', 'REZ': 'staking', 'KMNO': 'staking',
 };
 
-let _sectorsRef = DEFAULT_SECTORS;
+// Try to preseed the ref from localStorage at module load so the very
+// first render sees the user's custom sectors (if any). Silent-fail if
+// localStorage is unavailable (SSR, tests) — DEFAULT_SECTORS is the fallback.
+const _initialSectors = (() => {
+  try {
+    if (typeof localStorage === 'undefined') return DEFAULT_SECTORS;
+    const raw = localStorage.getItem('catena.store.v5');
+    if (!raw) return DEFAULT_SECTORS;
+    const parsed = JSON.parse(raw);
+    const list = parsed?.sectors;
+    if (Array.isArray(list) && list.length && list.some((s) => s?.id === 'base-layer')) {
+      return list;
+    }
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_SECTORS;
+})();
+
+let _sectorsRef = _initialSectors;
 export const setSectors = (arr) => {
   _sectorsRef = Array.isArray(arr) && arr.length ? arr : DEFAULT_SECTORS;
 };

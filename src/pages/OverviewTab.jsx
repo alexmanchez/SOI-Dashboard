@@ -1,14 +1,16 @@
-import React, { useMemo } from 'react';
+import {
+  useMemo,
+} from 'react';
 import _ from 'lodash';
 import { TrendingUp, Plus, Trash2, ExternalLink } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 import {
-  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, GREEN, RED, VIOLET,
+  PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, GREEN, VIOLET,
 } from '../lib/theme';
-import { fmtCurrency, fmtPct, fmtMoic, uid, today } from '../lib/format';
-import { latestSnapshot, isLiquid } from '../lib/snapshots';
+import {
+  fmtCurrency, fmtPct, fmtMoic, uid, today,
+} from '../lib/format';
 import {
   Panel, KPI, SectorBadge, LiquidityBadge, ChangeCell,
   EditableText, EditableNumber,
@@ -18,8 +20,12 @@ import {
   CompactSectorTilt, CompactManagerBreakdown,
   TopHoldingsPanel, TopMoversPanel,
 } from '../components/DashboardPanels';
+import { TimeSlider } from '../components/TimeSlider';
+import { AsOfPill } from '../components/AsOfPill';
+import { distinctSnapshotDates } from '../lib/snapshots';
 
-export function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, clientShareMode, scaleBy, updateStore }) {
+export function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, clientShareMode, scaleBy, updateStore, asOfDate, setAsOfDate }) {
+  const snapshotDates = useMemo(() => distinctSnapshotDates(rollup.soIs), [rollup.soIs]);
   // Latest snapshot date across the current selection — used as the "as of"
   // label on panels so an OCIO can see at a glance when the underlying holdings
   // data was last refreshed.
@@ -50,6 +56,18 @@ export function OverviewTab({ rollup, store, selection, priceHistory, historyLoa
 
   return (
     <div className="space-y-6">
+      {/* Top row: as-of pill + time-travel slider (when >1 distinct snapshot date). */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <AsOfPill dates={(rollup.managerBreakdown || []).map((m) => m.asOfDate)} />
+      </div>
+      {snapshotDates.length > 1 && (
+        <TimeSlider
+          dates={snapshotDates}
+          value={asOfDate}
+          onChange={setAsOfDate}
+        />
+      )}
+
       {/* PERFORMANCE CHART */}
       <PerformanceChart
         soiBundles={rollup.soIs}
@@ -61,6 +79,7 @@ export function OverviewTab({ rollup, store, selection, priceHistory, historyLoa
         onRangeChange={onRangeChange}
         onRequestFetch={onRequestFetch}
         apiKey={apiKey}
+        asOfDate={asOfDate}
         title="Portfolio performance"
         height={280}
       />
