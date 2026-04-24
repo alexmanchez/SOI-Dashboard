@@ -1,32 +1,32 @@
-import React, { useContext, useMemo, useState } from 'react';
+import {
+  useMemo, useState,
+} from 'react';
 import _ from 'lodash';
 import {
-  ArrowLeft, X, Check, Plus, Trash2, RefreshCw,
-  Calendar, ChevronDown, ChevronRight,
+  ArrowLeft, Check, Plus, Trash2, RefreshCw,
 } from 'lucide-react';
 
 import {
-  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
+  BG, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, GREEN, RED, GOLD,
 } from '../lib/theme';
-import { fmtCurrency, fmtPct, fmtPctSigned, fmtNum, fmtMoic, fundLabel, uid, today } from '../lib/format';
-import { getSectors, sectorOf, resolveSector } from '../lib/sectors';
-import { RANGES } from '../lib/ranges';
+import {
+  fmtCurrency, fmtPct, fmtMoic, fundLabel, uid,
+} from '../lib/format';
+import {
+  getSectors, resolveSector,
+} from '../lib/sectors';
 import {
   snapshotsOf, latestSnapshot, sortedSnapshots, isLiquid, liquidityOverrideOf,
 } from '../lib/snapshots';
-import { OpenTokenDetailContext } from '../contexts';
 
 import {
-  Panel, Pill, EditableText, EditableNumber, EditableSelect,
-  SectorBadge, LiquidityBadge, ChangeCell, SortHead,
-  ManagerSocials, KPI, NumField, Stat,
+  Panel, EditableText, EditableNumber, EditableSelect, SectorBadge, ChangeCell, KPI, NumField, Stat,
 } from '../components/ui';
-import { TokenIcon } from '../components/TokenIcon';
-import { PerformanceChart } from '../components/PerformanceChart';
 import {
-  CompactSectorTilt, TopHoldingsPanel, TopMoversPanel,
-  LiquidityBreakdownPanel,
+  PerformanceChart,
+} from '../components/PerformanceChart';
+import {
+  TopMoversPanel, LiquidityBreakdownPanel,
 } from '../components/DashboardPanels';
 import { PositionEditor } from './PositionEditor';
 import { ImportWizard } from '../import/ImportWizard';

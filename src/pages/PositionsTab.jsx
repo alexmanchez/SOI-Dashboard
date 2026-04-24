@@ -1,22 +1,27 @@
-import React, { useContext, useMemo, useState } from 'react';
+import {
+  useMemo, useState,
+} from 'react';
 import _ from 'lodash';
-import { Search, ArrowLeft } from 'lucide-react';
+import {
+  Search,
+} from 'lucide-react';
 
 import {
-  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, GREEN, RED, GOLD,
+  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, GREEN, GOLD,
 } from '../lib/theme';
-import { fmtCurrency, fmtPct, fmtNum, fundLabel } from '../lib/format';
+import {
+  fmtCurrency, fmtPct,
+} from '../lib/format';
 import { getSectors, sectorOf } from '../lib/sectors';
-import { snapshotsOf, latestSnapshot, isLiquid } from '../lib/snapshots';
-import { OpenTokenDetailContext } from '../contexts';
+import {
+  snapshotsOf,
+} from '../lib/snapshots';
 
 import {
-  Panel, Pill, SectorBadge, LiquidityBadge, SortHead, ChangeCell,
+  Panel, SortHead, ChangeCell,
 } from '../components/ui';
-import { TokenIcon } from '../components/TokenIcon';
 
-export function PositionsTab({ rollup, store, updateStore }) {
+export function PositionsTab({ rollup, store: _store, updateStore }) {
   const [search, setSearch] = useState('');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [liquidityFilter, setLiquidityFilter] = useState('all');

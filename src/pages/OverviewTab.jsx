@@ -1,14 +1,16 @@
-import React, { useMemo } from 'react';
+import {
+  useMemo,
+} from 'react';
 import _ from 'lodash';
 import { TrendingUp, Plus, Trash2, ExternalLink } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 import {
-  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, GREEN, RED, VIOLET,
+  PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, GREEN, VIOLET,
 } from '../lib/theme';
-import { fmtCurrency, fmtPct, fmtMoic, uid, today } from '../lib/format';
-import { latestSnapshot, isLiquid } from '../lib/snapshots';
+import {
+  fmtCurrency, fmtPct, fmtMoic, uid, today,
+} from '../lib/format';
 import {
   Panel, KPI, SectorBadge, LiquidityBadge, ChangeCell,
   EditableText, EditableNumber,

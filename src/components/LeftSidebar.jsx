@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   LayoutDashboard, Layers, PieChart as PieChartIcon, DollarSign,
 } from 'lucide-react';

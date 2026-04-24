@@ -1,13 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import {
+  useEffect, useMemo, useState,
+} from 'react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip,
   ReferenceLine, ReferenceArea,
 } from 'recharts';
-import { RefreshCw, AlertCircle } from 'lucide-react';
+import {
+  RefreshCw,
+} from 'lucide-react';
 
 import {
-  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, GREEN, RED, GOLD,
+  PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, GREEN, RED, GOLD,
 } from '../lib/theme';
 import { fmtCurrency, fmtPctSigned } from '../lib/format';
 import { RANGES, rangeToStartMs, rangeToDays } from '../lib/ranges';

@@ -1,17 +1,19 @@
-import React, { useState } from 'react';
-import { X, Check, Trash2 } from 'lucide-react';
+import {
+  useState,
+} from 'react';
+import {
+  Check,
+} from 'lucide-react';
 
 import {
-  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, GREEN, RED,
+  BG, BORDER, TEXT_DIM, TEXT_MUTE, ACCENT,
 } from '../lib/theme';
-import { fmtCurrency, uid } from '../lib/format';
 import { getSectors } from '../lib/sectors';
 import { liquidityOverrideOf } from '../lib/snapshots';
 import { parseNum } from '../lib/parsing';
 
 import {
-  Field, TextInput, NumField, Stat, Select, LiquidityBadge, SectorBadge, Modal,
+  Field, TextInput, Select, Modal,
 } from '../components/ui';
 
 export function PositionEditor({ mode, position, onCancel, onSave }) {

@@ -40,7 +40,14 @@ export default [
       'react-hooks/immutability': 'off',
       'react-hooks/preserve-manual-memoization': 'error',
       'react-hooks/error-boundaries': 'error',
-      'no-unused-vars': 'off',
+      'no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
       'no-useless-escape': 'off',
       'no-empty': 'off',
       'no-prototype-builtins': 'off',

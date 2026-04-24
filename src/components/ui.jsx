@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
-  Home, Users, Briefcase, Layers, ChevronRight, ChevronDown,
-  Globe, Twitter, Linkedin, ExternalLink, X,
+  Home, Users, Briefcase, ChevronRight, ChevronDown, Globe, Twitter, Linkedin, ExternalLink, X,
 } from 'lucide-react';
 
 import {

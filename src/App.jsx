@@ -1,71 +1,64 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef, useContext } from 'react';
-import catenaLogo from './assets/catena-logo.png';
-import * as XLSX from 'xlsx';
-import Papa from 'papaparse';
-import _ from 'lodash';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, LineChart, Line, ReferenceLine, ReferenceArea } from 'recharts';
-import { Upload, RefreshCw, AlertCircle, Layers, Search, Lock, ArrowLeft, FileSpreadsheet, Activity, Plus, Settings, Download, Trash2, Users, Briefcase, Building2, ChevronDown, ChevronRight, Edit2, X, Check, Eye, EyeOff, TrendingUp, Calendar, Home, Globe, Twitter, Linkedin, ExternalLink, PieChart as PieChartIcon, DollarSign, LayoutDashboard } from 'lucide-react';
 import {
-  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
+  useState, useMemo, useCallback, useEffect,
+} from 'react';
+import catenaLogo from './assets/catena-logo.png';
+import _ from 'lodash';
+import {
+  Upload, RefreshCw, AlertCircle, Layers, Search, Plus, Settings, Users, Briefcase, ChevronRight, Calendar, Home, DollarSign,
+} from 'lucide-react';
+import {
+  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, RED,
 } from './lib/theme';
 import {
-  fmtCurrency, fmtPct, fmtPctSigned, fmtMoic, fmtNum, fundLabel, uid, today,
+  fmtCurrency, fundLabel,
 } from './lib/format';
 import {
-  DEFAULT_SECTORS, DEFAULT_TOKEN_SECTOR, LEGACY_SECTOR_MAP, UNCLASSIFIED,
-  getSectors, setSectors, sectorOf, resolveSector,
+  DEFAULT_SECTORS, setSectors,
 } from './lib/sectors';
-import { RANGES, MOVER_RANGES, DETAIL_RANGES, rangeToStartMs, rangeToDays } from './lib/ranges';
 import {
-  FIELDS, SUBTOTAL_PATTERNS, normalize, parseNum, parseDate,
-  matchScore, autoMapColumns, detectHeaderRow, dedupeHeaders,
-} from './lib/parsing';
-import { STORE_KEY, emptyStore, loadStore, saveStore } from './lib/storage';
+  loadStore, saveStore,
+} from './lib/storage';
 import { seedStore } from './lib/seed';
 import {
-  snapshotsOf, latestSnapshot, sortedSnapshots, isLiquid, liquidityOverrideOf,
+  latestSnapshot,
 } from './lib/snapshots';
-import { getSelectedSOIs, computeRollup, buildNAVSeries, buildNAVSeriesSimple } from './lib/rollup';
 import {
-  CG_BASE, EMBEDDED_CG_API_KEY, resolveApiKey,
-  fetchLivePrices, fetchCoinDetail, fetchCoinChart, fetchHistory,
+  computeRollup,
+} from './lib/rollup';
+import {
+  resolveApiKey, fetchLivePrices, fetchHistory,
 } from './lib/api/coingecko';
 import {
-  CR_BASE, EMBEDDED_CR_API_KEY, cryptorankFetch,
-  TOKEN_IMAGES_CACHE_KEY, loadTokenImagesCache, saveTokenImagesCache, fetchTokenImagesMap,
+  loadTokenImagesCache, saveTokenImagesCache, fetchTokenImagesMap,
 } from './lib/api/cryptorank';
 import {
-  EMBEDDED_CMC_API_KEY, CMC_IMG, CMC_GIF,
-  CMC_ID_CACHE_KEY, cmcFetch, loadCmcIdCache, saveCmcIdCache, fetchCmcIdMap,
+  loadCmcIdCache, saveCmcIdCache, fetchCmcIdMap,
 } from './lib/api/coinmarketcap';
-import { TokenImageContext, OpenTokenDetailContext } from './contexts';
+import {
+  TokenImageContext, OpenTokenDetailContext,
+} from './contexts';
 
 import {
-  Panel, KPI, Pill, Tab, NavButton, Breadcrumb, EditableText,
-  ManagerSocials, SectorBadge, LiquidityBadge, ChangeCell,
-  SortHead, Modal, ChoiceCard, MenuItem, PlaceholderPage,
-  Field, TextInput, NumField, Stat, Select,
+  Panel, NavButton, Breadcrumb, EditableText, PlaceholderPage,
 } from './components/ui';
-import { TokenIcon } from './components/TokenIcon';
-import { TokenDetailDrawer } from './components/TokenDetailDrawer';
-import { LeftSidebar, SIDEBAR_SECTIONS } from './components/LeftSidebar';
-import { PortfolioSelector } from './components/PortfolioSelector';
-import { PerformanceChart } from './components/PerformanceChart';
-import { MiniSparkline } from './components/MiniSparkline';
 import {
-  CompactSectorTilt, CompactManagerBreakdown,
-  TopHoldingsPanel, TopMoversPanel,
-  FullSectorTiltPanel, LiquidityBreakdownPanel, FullTopHoldingsTable,
-} from './components/DashboardPanels';
+  TokenIcon,
+} from './components/TokenIcon';
+import {
+  TokenDetailDrawer,
+} from './components/TokenDetailDrawer';
+import {
+  LeftSidebar,
+} from './components/LeftSidebar';
 
-import { OverviewTab } from './pages/OverviewTab';
+import {
+  OverviewTab,
+} from './pages/OverviewTab';
 import { ExposuresPage } from './pages/ExposuresPage';
 import { FundEconomicsPage } from './pages/FundEconomicsPage';
 import { ManagersTab } from './pages/ManagersTab';
 import { PositionsTab } from './pages/PositionsTab';
 import { SOIDetail } from './pages/SOIDetail';
-import { PositionEditor } from './pages/PositionEditor';
 import { SettingsDrawer } from './pages/SettingsDrawer';
 import { ImportWizard } from './import/ImportWizard';
 

@@ -1,4 +1,4 @@
-import React, { useContext, useState } from 'react';
+import { useContext, useState } from 'react';
 
 import { PANEL_2, BORDER, TEXT_DIM } from '../lib/theme';
 import { CMC_GIF, CMC_IMG } from '../lib/api/coinmarketcap';

@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import {
+  useEffect, useMemo, useState,
+} from 'react';
 import {
   RefreshCw, X, Globe, Twitter, ExternalLink, Maximize2, Minimize2,
 } from 'lucide-react';
@@ -7,8 +9,7 @@ import {
 } from 'recharts';
 
 import {
-  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT_2, GREEN, RED,
+  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, GREEN, RED,
 } from '../lib/theme';
 import { fmtCurrency, fmtNum, fmtPctSigned, fundLabel } from '../lib/format';
 import { latestSnapshot } from '../lib/snapshots';

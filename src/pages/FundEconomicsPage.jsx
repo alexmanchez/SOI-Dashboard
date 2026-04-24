@@ -1,14 +1,17 @@
-import React, { useMemo } from 'react';
-import { DollarSign } from 'lucide-react';
+import {
+  useMemo,
+} from 'react';
 import _ from 'lodash';
 
 import {
-  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
+  BORDER, TEXT_DIM, TEXT_MUTE,
 } from '../lib/theme';
-import { fmtCurrency, fmtPct, fmtMoic, fundLabel } from '../lib/format';
-import { latestSnapshot, isLiquid } from '../lib/snapshots';
-import { Panel, PlaceholderPage, KPI } from '../components/ui';
+import {
+  fmtCurrency, fmtPct, fmtMoic, fundLabel,
+} from '../lib/format';
+import {
+  Panel, KPI,
+} from '../components/ui';
 
 export function FundEconomicsPage({ rollup, store, selection, clientShareMode }) {
   const commits = useMemo(() => {

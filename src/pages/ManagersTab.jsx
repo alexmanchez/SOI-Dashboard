@@ -1,23 +1,36 @@
-import React, { useState } from 'react';
+import {
+  useState,
+} from 'react';
 import _ from 'lodash';
-import { Briefcase, ChevronRight, TrendingUp } from 'lucide-react';
+import {
+  ChevronRight,
+} from 'lucide-react';
 
 import {
-  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, ACCENT_2, GREEN, RED, VIOLET,
+  PANEL_2, BORDER, TEXT_DIM, TEXT_MUTE, GREEN, RED, VIOLET,
 } from '../lib/theme';
-import { fmtCurrency, fmtPct, fmtPctSigned, fmtMoic, fundLabel } from '../lib/format';
+import {
+  fmtCurrency, fmtPct, fmtPctSigned, fmtMoic,
+} from '../lib/format';
 import { sectorOf, resolveSector } from '../lib/sectors';
-import { RANGES, rangeToStartMs } from '../lib/ranges';
-import { snapshotsOf, latestSnapshot, isLiquid } from '../lib/snapshots';
-import { buildNAVSeries, buildNAVSeriesSimple } from '../lib/rollup';
+import {
+  rangeToStartMs,
+} from '../lib/ranges';
+import {
+  latestSnapshot, isLiquid,
+} from '../lib/snapshots';
+import {
+  buildNAVSeriesSimple,
+} from '../lib/rollup';
 import { Panel } from '../components/ui';
-import { MiniSparkline } from '../components/MiniSparkline';
+import {
+  MiniSparkline,
+} from '../components/MiniSparkline';
 
 // Wrapping Date.now so react-hooks/purity doesn't flag the refresh below.
 const nowFn = () => Date.now();
 
-export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clientShareMode, scaleBy }) {
+export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clientShareMode, scaleBy: _scaleBy }) {
   // Stable "now" for sparklines; refresh via setState-during-render when
   // the user changes the range pill.
   const [nowMs, setNowMs] = useState(nowFn);

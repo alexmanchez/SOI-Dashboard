@@ -1,11 +1,14 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
-  Users, Briefcase, Layers, ChevronDown, ChevronRight, Plus, Home, Building2,
+  useState, useRef, useEffect, useMemo,
+} from 'react';
+import {
+  Users, Briefcase, ChevronDown, Building2,
 } from 'lucide-react';
 
-import { PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2 } from '../lib/theme';
+import {
+  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT,
+} from '../lib/theme';
 import { fundLabel } from '../lib/format';
-import { latestSnapshot } from '../lib/snapshots';
 
 import { MenuItem } from './ui';
 

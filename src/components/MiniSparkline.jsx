@@ -1,6 +1,6 @@
-import React from 'react';
-
-import { ACCENT, GREEN, RED } from '../lib/theme';
+import {
+  GREEN, RED,
+} from '../lib/theme';
 
 export function MiniSparkline({ series, width=120, height=32 }) {
   if (!series?.length || series.length < 2) {

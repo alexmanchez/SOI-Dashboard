@@ -1,17 +1,19 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  useMemo, useRef, useState,
+} from 'react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import _ from 'lodash';
 import {
-  Upload, FileSpreadsheet, ArrowLeft, Check, X, AlertCircle, Edit2, Plus, Trash2,
-  ChevronDown, ChevronRight, RefreshCw,
+  Upload, FileSpreadsheet, ArrowLeft, Check, X, Edit2, Plus, RefreshCw,
 } from 'lucide-react';
 
 import {
-  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, ACCENT_2, GREEN, RED, GOLD,
+  BG, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, RED, GOLD,
 } from '../lib/theme';
-import { fmtCurrency, fmtNum, uid, today, fundLabel } from '../lib/format';
+import {
+  fmtCurrency, uid, today,
+} from '../lib/format';
 import {
   DEFAULT_TOKEN_SECTOR, UNCLASSIFIED, getSectors,
 } from '../lib/sectors';

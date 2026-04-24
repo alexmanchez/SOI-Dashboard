@@ -1,5 +1,7 @@
 import _ from 'lodash';
-import { snapshotsOf, latestSnapshot, snapshotAsOf, sortedSnapshots, isLiquid } from './snapshots';
+import {
+  snapshotsOf, snapshotAsOf, sortedSnapshots, isLiquid,
+} from './snapshots';
 import { resolveSector, sectorOf, getSectors } from './sectors';
 
 export const getSelectedSOIs = (store, selection) => {
