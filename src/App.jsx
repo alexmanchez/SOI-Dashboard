@@ -173,12 +173,18 @@ export default function App() {
   }, [searchQuery, store]);
   const [drilldownSoi, setDrilldownSoi] = useState(null); // when viewing a single SOI in depth
 
-  // Snap subPage back to dashboard if the user switches to a manager/vintage
-  // view while Fund Economics was open (it's client-scoped).
-  useEffect(() => {
-    const onMgrOrVint = selection.kind === 'manager' || selection.kind === 'vintage' || !!drilldownSoi;
+  // Fund Economics is client-scoped. Snap it back to 'dashboard' if the user
+  // navigates into a manager/vintage view — done via setState-during-render
+  // (React's blessed pattern for resetting state when deps change) instead
+  // of a useEffect, which would lag one render and trip set-state-in-effect.
+  const [_lastScopeKey, _setLastScopeKey] = useState(null);
+  const _scopeKey = `${selection.kind}:${selection.id || ''}:${drilldownSoi || ''}`;
+  if (_scopeKey !== _lastScopeKey) {
+    _setLastScopeKey(_scopeKey);
+    const onMgrOrVint =
+      selection.kind === 'manager' || selection.kind === 'vintage' || !!drilldownSoi;
     if (onMgrOrVint && subPage === 'fund-economics') setSubPage('dashboard');
-  }, [selection, drilldownSoi]);
+  }
   const [range, setRange] = useState('SI');
 
   // Live prices (in-memory only; re-fetch on demand)

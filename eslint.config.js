@@ -33,7 +33,7 @@ export default [
       'react/no-unescaped-entities': 'off',
       'react-hooks/exhaustive-deps': 'off',
       'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/set-state-in-effect': 'error',
       'react-hooks/set-state-in-render': 'off',
       'react-hooks/purity': 'error',
       'react-hooks/refs': 'off',

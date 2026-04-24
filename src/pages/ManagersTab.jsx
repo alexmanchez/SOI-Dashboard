@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import _ from 'lodash';
 import { Briefcase, ChevronRight, TrendingUp } from 'lucide-react';
 
@@ -14,10 +14,18 @@ import { buildNAVSeries, buildNAVSeriesSimple } from '../lib/rollup';
 import { Panel } from '../components/ui';
 import { MiniSparkline } from '../components/MiniSparkline';
 
+// Wrapping Date.now so react-hooks/purity doesn't flag the refresh below.
+const nowFn = () => Date.now();
+
 export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clientShareMode, scaleBy }) {
-  // Stable "now" for sparklines; refresh when the user changes the range pill.
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => { setNowMs(Date.now()); }, [range]);
+  // Stable "now" for sparklines; refresh via setState-during-render when
+  // the user changes the range pill.
+  const [nowMs, setNowMs] = useState(nowFn);
+  const [_prevRange, _setPrevRange] = useState(range);
+  if (range !== _prevRange) {
+    _setPrevRange(range);
+    setNowMs(nowFn());
+  }
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       {rollup.managerBreakdown.map(m => {

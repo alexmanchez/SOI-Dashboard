@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useContext, useMemo, useState } from 'react';
 import _ from 'lodash';
 import {
   ArrowLeft, X, Check, Plus, Trash2, RefreshCw,
@@ -39,7 +39,14 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
 
   const snaps = soi ? sortedSnapshots(soi) : [];
   const [selectedSnapId, setSelectedSnapId] = useState(() => latestSnapshot(soi)?.id ?? null);
-  useEffect(() => { setSelectedSnapId(latestSnapshot(soi)?.id ?? null); }, [soiId]);
+  // Reset the selected snapshot when the user drills into a different fund.
+  // setState-during-render (React's blessed pattern for prop-keyed resets)
+  // instead of useEffect so we don't trip set-state-in-effect.
+  const [_prevSoiId, _setPrevSoiId] = useState(soiId);
+  if (soiId !== _prevSoiId) {
+    _setPrevSoiId(soiId);
+    setSelectedSnapId(latestSnapshot(soi)?.id ?? null);
+  }
 
   const selectedSnap = soi
     ? (snaps.find(s => s.id === selectedSnapId) || latestSnapshot(soi) || snaps[0])

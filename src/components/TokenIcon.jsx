@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useState } from 'react';
 
 import { PANEL_2, BORDER, TEXT_DIM } from '../lib/theme';
 import { CMC_GIF, CMC_IMG } from '../lib/api/coinmarketcap';
@@ -19,7 +19,15 @@ export const TokenIcon = ({ ticker, name, size = 20 }) => {
   if (crImage) sources.push(crImage);        // tertiary: CryptoRank image
   if (symbolLower) sources.push(`https://cdn.jsdelivr.net/gh/atomiclabs/cryptocurrency-icons@master/svg/color/${symbolLower}.svg`);
   const [stage, setStage] = useState(0);
-  useEffect(() => { setStage(0); }, [symbolUpper, cmcId, crImage]);
+  // Reset the image-fallback chain when the ticker / id changes, without
+  // waiting a render. setState-during-render is React's recommended pattern
+  // for resetting state keyed on props.
+  const sourceKey = `${symbolUpper}|${cmcId}|${crImage}`;
+  const [_prevSourceKey, _setPrevSourceKey] = useState(sourceKey);
+  if (sourceKey !== _prevSourceKey) {
+    _setPrevSourceKey(sourceKey);
+    setStage(0);
+  }
   const src = sources[stage];
   if (!symbol || !src) {
     const letter = ((ticker || name || '?').trim().charAt(0) || '?').toUpperCase();
