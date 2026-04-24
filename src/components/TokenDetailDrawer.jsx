@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  RefreshCw, X, Globe, Twitter, ExternalLink,
+  RefreshCw, X, Globe, Twitter, ExternalLink, Maximize2, Minimize2,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip,
@@ -25,7 +25,21 @@ export function TokenDetailDrawer({ token, onClose, apiKey, store }) {
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [expanded, _setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => {
+    // If we land with #/token/:id already in the URL, open expanded.
+    const m = typeof window !== 'undefined' && /#\/token\//.test(window.location.hash);
+    return !!m;
+  });
+
+  // Drive the URL hash off `expanded` so an expanded view is shareable.
+  useEffect(() => {
+    if (!token?.cgTokenId) return;
+    const target = expanded ? `#/token/${encodeURIComponent(token.cgTokenId)}` : '';
+    if (window.location.hash !== target) {
+      if (target) window.history.replaceState(null, '', target);
+      else window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, [expanded, token?.cgTokenId]);
 
   useEffect(() => {
     if (!token?.cgTokenId) {
@@ -106,9 +120,16 @@ export function TokenDetailDrawer({ token, onClose, apiKey, store }) {
                 </div>
               </div>
             </div>
-            <button onClick={onClose} className="p-1.5 rounded flex-shrink-0"
-              style={{ color: TEXT_DIM, backgroundColor: PANEL_2, border: `1px solid ${BORDER}` }}
-              title="Close"><X size={14}/></button>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button onClick={() => setExpanded((v) => !v)} className="p-1.5 rounded"
+                style={{ color: TEXT_DIM, backgroundColor: PANEL_2, border: `1px solid ${BORDER}` }}
+                title={expanded ? 'Shrink drawer' : 'Expand drawer'}>
+                {expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
+              <button onClick={onClose} className="p-1.5 rounded"
+                style={{ color: TEXT_DIM, backgroundColor: PANEL_2, border: `1px solid ${BORDER}` }}
+                title="Close"><X size={14}/></button>
+            </div>
           </div>
           {price != null && (
             <div className="flex items-baseline gap-3 mt-4 flex-wrap">

@@ -100,6 +100,22 @@ export default function App() {
   const [subPage, setSubPage] = useState('dashboard'); // dashboard | positions | exposures | fund-economics
   const [detailToken, setDetailToken] = useState(null);
 
+  /* Drawer-via-URL: if the user lands on #/token/:id (or navigates with back/
+     forward), open the drawer pre-loaded to that token. The drawer itself
+     writes the hash when the user expands it, so a shared URL round-trips. */
+  useEffect(() => {
+    const applyHash = () => {
+      const m = window.location.hash.match(/^#\/token\/([^/?]+)/);
+      if (m) {
+        const cgTokenId = decodeURIComponent(m[1]);
+        setDetailToken((t) => (t && t.cgTokenId === cgTokenId ? t : { cgTokenId, symbol: '', name: cgTokenId }));
+      }
+    };
+    applyHash();
+    window.addEventListener('hashchange', applyHash);
+    return () => window.removeEventListener('hashchange', applyHash);
+  }, []);
+
   /* Token image caches: CryptoRank (fallback source) + CoinMarketCap
      (primary source, higher-quality logos). Both fetched once per browser
      and persisted in localStorage. */
@@ -859,7 +875,12 @@ export default function App() {
         />
       )}
     </div>
-    {detailToken && <TokenDetailDrawer token={detailToken} onClose={() => setDetailToken(null)} apiKey={effectiveApiKey} store={store} />}
+    {detailToken && <TokenDetailDrawer token={detailToken} onClose={() => {
+      setDetailToken(null);
+      if (/^#\/token\//.test(window.location.hash)) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    }} apiKey={effectiveApiKey} store={store} />}
     </OpenTokenDetailContext.Provider></TokenImageContext.Provider>
   );
 }
