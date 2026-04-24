@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import _ from 'lodash';
 import { Briefcase, ChevronRight, TrendingUp } from 'lucide-react';
 
@@ -15,6 +15,9 @@ import { Panel } from '../components/ui';
 import { MiniSparkline } from '../components/MiniSparkline';
 
 export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clientShareMode, scaleBy }) {
+  // Stable "now" for sparklines; refresh when the user changes the range pill.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => { setNowMs(Date.now()); }, [range]);
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       {rollup.managerBreakdown.map(m => {
@@ -28,7 +31,7 @@ export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKe
         // Per-SOI sparkline
         const startMs = rangeToStartMs(range, positions);
         const series = apiKey && Object.keys(priceHistory).length > 0
-          ? buildNAVSeriesSimple(positions, priceHistory, startMs, Date.now())
+          ? buildNAVSeriesSimple(positions, priceHistory, startMs, nowMs)
           : [];
         const startVal = series[0]?.value ?? 0;
         const endVal = series[series.length-1]?.value ?? 0;

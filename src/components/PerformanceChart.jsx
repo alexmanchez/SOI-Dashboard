@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip,
   ReferenceLine, ReferenceArea,
@@ -26,6 +26,12 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
   const allPositions = useMemo(() => soiBundles.flatMap(b => snapshotsOf(b).flatMap(s => s.positions||[])), [soiBundles]);
   const daysNeeded = useMemo(() => Math.min(rangeToDays(range, allPositions), 365), [range, allPositions]);
 
+  // Stable "now" for the chart's right-edge. Capturing in state keeps the
+  // useMemo below pure (Date.now() is impure); we refresh it when the user
+  // picks a new range, which is when the chart window actually needs to move.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => { setNowMs(Date.now()); }, [range]);
+
   // Trigger fetch if we're missing data
   useEffect(() => {
     if (!apiKey || !tokenIds.length) return;
@@ -36,8 +42,8 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
   const { series, earliestSnapshotMs, latestSnapshotMs, snapshotDates } = useMemo(() => {
     if (!soiBundles.length) return { series:[], earliestSnapshotMs:null, latestSnapshotMs:null, snapshotDates:[] };
     const startMs = rangeToStartMs(range, allPositions);
-    return buildNAVSeries(soiBundles, priceHistory, startMs, Date.now(), scaleFn);
-  }, [soiBundles, priceHistory, range, allPositions, scaleFn]);
+    return buildNAVSeries(soiBundles, priceHistory, startMs, nowMs, scaleFn);
+  }, [soiBundles, priceHistory, range, allPositions, scaleFn, nowMs]);
 
   // Derive asOfMs from latestSnapshotMs for badge display
   const asOfMs = latestSnapshotMs;

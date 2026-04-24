@@ -35,7 +35,7 @@ export default [
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/set-state-in-effect': 'off',
       'react-hooks/set-state-in-render': 'off',
-      'react-hooks/purity': 'off',
+      'react-hooks/purity': 'error',
       'react-hooks/refs': 'off',
       'react-hooks/immutability': 'off',
       'react-hooks/preserve-manual-memoization': 'off',
