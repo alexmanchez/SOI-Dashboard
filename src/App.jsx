@@ -774,7 +774,7 @@ export default function App() {
               <OverviewTab rollup={rollup} store={store} selection={selection}
                 priceHistory={priceHistory} historyLoading={historyLoading} historyProgress={historyProgress}
                 range={range} onRangeChange={setRange} onRequestFetch={fetchHistoryFor}
-                apiKey={effectiveApiKey}
+                apiKey={effectiveApiKey} updateStore={updateStore}
                 clientShareMode={clientShareMode} scaleBy={scaleBy} />
             )}
             {subPage === 'positions' && (

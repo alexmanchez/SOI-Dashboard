@@ -1,16 +1,17 @@
 import React, { useMemo } from 'react';
 import _ from 'lodash';
-import { TrendingUp } from 'lucide-react';
+import { TrendingUp, Plus, Trash2, ExternalLink } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 import {
   PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
   ACCENT, GREEN, RED, VIOLET,
 } from '../lib/theme';
-import { fmtCurrency, fmtPct, fmtMoic } from '../lib/format';
+import { fmtCurrency, fmtPct, fmtMoic, uid, today } from '../lib/format';
 import { latestSnapshot, isLiquid } from '../lib/snapshots';
 import {
   Panel, KPI, SectorBadge, LiquidityBadge, ChangeCell,
+  EditableText, EditableNumber,
 } from '../components/ui';
 import { PerformanceChart } from '../components/PerformanceChart';
 import {
@@ -18,7 +19,7 @@ import {
   TopHoldingsPanel, TopMoversPanel,
 } from '../components/DashboardPanels';
 
-export function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, clientShareMode, scaleBy }) {
+export function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, clientShareMode, scaleBy, updateStore }) {
   // Latest snapshot date across the current selection — used as the "as of"
   // label on panels so an OCIO can see at a glance when the underlying holdings
   // data was last refreshed.
@@ -124,6 +125,14 @@ export function OverviewTab({ rollup, store, selection, priceHistory, historyLoa
         <TopHoldingsPanel tokenRollup={rollup.tokenRollup} asOf={dataAsOf} />
         <TopMoversPanel rollup={rollup} priceHistory={priceHistory} />
       </div>
+
+      {/* Manager view only: recent investments log — hand-curated. */}
+      {selection?.kind === 'manager' && updateStore && (
+        <RecentInvestmentsPanel
+          manager={store.managers.find((m) => m.id === selection.id)}
+          updateStore={updateStore}
+        />
+      )}
 
       {/* Legacy grid — the Dashboard intentionally omits the large panels now;
           they live on the Exposures page. */}
@@ -246,6 +255,149 @@ export function OverviewTab({ rollup, store, selection, priceHistory, historyLoa
         </div>
       </Panel>
     </div>
+  );
+}
+
+/* Recent investments log for a manager. Rows are hand-entered:
+   name (deal), round, amount ($), date, optional URL. Each cell edits
+   inline; the + button appends a blank row; × removes it. */
+function RecentInvestmentsPanel({ manager, updateStore }) {
+  if (!manager) return null;
+  const items = manager.recentInvestments || [];
+
+  const mutate = (mutator) =>
+    updateStore((s) => ({
+      ...s,
+      managers: s.managers.map((m) =>
+        m.id !== manager.id ? m : { ...m, recentInvestments: mutator(m.recentInvestments || []) }
+      ),
+    }));
+
+  const addRow = () =>
+    mutate((xs) => [...xs, { id: uid(), name: '', round: '', amount: null, date: today(), url: '' }]);
+  const updateRow = (id, patch) =>
+    mutate((xs) => xs.map((x) => (x.id !== id ? x : { ...x, ...patch })));
+  const removeRow = (id) => mutate((xs) => xs.filter((x) => x.id !== id));
+
+  return (
+    <Panel className="p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="text-xs uppercase tracking-wider" style={{ color: TEXT_MUTE }}>
+            Recent investments
+          </div>
+          <div className="text-base font-semibold mt-0.5">Portfolio activity</div>
+        </div>
+        <button
+          onClick={addRow}
+          className="text-xs px-2 py-1 rounded flex items-center gap-1"
+          style={{ backgroundColor: ACCENT, color: '#070B14', fontWeight: 600 }}
+        >
+          <Plus size={12} /> Add
+        </button>
+      </div>
+      {items.length === 0 ? (
+        <div
+          className="text-xs py-6 text-center rounded"
+          style={{ color: TEXT_DIM, border: `1px dashed ${BORDER}` }}
+        >
+          Add recent investments to showcase this manager&apos;s portfolio activity.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr
+                style={{
+                  color: TEXT_MUTE,
+                  fontSize: 11,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  borderBottom: `1px solid ${BORDER}`,
+                }}
+              >
+                <th className="text-left px-3 py-2">Investment</th>
+                <th className="text-left px-3 py-2">Round</th>
+                <th className="text-right px-3 py-2">Amount</th>
+                <th className="text-left px-3 py-2">Date</th>
+                <th className="text-left px-3 py-2">Link</th>
+                <th className="text-right px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it) => (
+                <tr key={it.id} style={{ borderBottom: `1px solid ${BORDER}` }}>
+                  <td className="px-3 py-2">
+                    <EditableText
+                      value={it.name}
+                      onCommit={(v) => updateRow(it.id, { name: v })}
+                      placeholder="Company / deal"
+                      className="font-medium"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <EditableText
+                      value={it.round}
+                      onCommit={(v) => updateRow(it.id, { round: v })}
+                      placeholder="Seed / A / etc."
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    <EditableNumber
+                      value={it.amount ?? null}
+                      onCommit={(v) => updateRow(it.id, { amount: v })}
+                      format={(v) => (v != null ? fmtCurrency(v) : '—')}
+                      placeholder="—"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <EditableText
+                      value={it.date}
+                      onCommit={(v) => updateRow(it.id, { date: v })}
+                      placeholder="YYYY-MM-DD"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    {it.url ? (
+                      <a
+                        href={it.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs"
+                        style={{ color: ACCENT }}
+                      >
+                        <ExternalLink size={11} />
+                        <EditableText
+                          value={it.url}
+                          onCommit={(v) => updateRow(it.id, { url: v })}
+                          placeholder="https://"
+                        />
+                      </a>
+                    ) : (
+                      <EditableText
+                        value={it.url}
+                        onCommit={(v) => updateRow(it.id, { url: v })}
+                        placeholder="https://"
+                      />
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => removeRow(it.id)}
+                      className="p-1 rounded"
+                      style={{ color: TEXT_DIM }}
+                      title="Remove"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
   );
 }
 
