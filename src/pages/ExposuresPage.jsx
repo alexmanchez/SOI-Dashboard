@@ -2,6 +2,7 @@ import React from 'react';
 
 import {
   FullSectorTiltPanel, LiquidityBreakdownPanel, FullTopHoldingsTable,
+  CompactManagerBreakdown,
 } from '../components/DashboardPanels';
 
 export function ExposuresPage({ rollup, selection }) {

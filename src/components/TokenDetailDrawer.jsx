@@ -25,6 +25,7 @@ export function TokenDetailDrawer({ token, onClose, apiKey, store }) {
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [expanded, _setExpanded] = useState(false);
 
   useEffect(() => {
     if (!token?.cgTokenId) {

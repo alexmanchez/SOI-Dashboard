@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
-  Users, Briefcase, Layers, ChevronDown, ChevronRight, Plus, Home,
+  Users, Briefcase, Layers, ChevronDown, ChevronRight, Plus, Home, Building2,
 } from 'lucide-react';
 
 import { PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2 } from '../lib/theme';

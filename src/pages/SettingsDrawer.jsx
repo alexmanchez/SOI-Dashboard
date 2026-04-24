@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import * as XLSX from 'xlsx';
 import _ from 'lodash';
 import {
   X, Plus, Edit2, Check, Trash2, Upload, Download, Eye, EyeOff,
   RefreshCw, AlertCircle, Calendar, ChevronDown,
-  Building2, Users, Briefcase,
+  Building2, Users, Briefcase, Lock, FileSpreadsheet, Layers,
 } from 'lucide-react';
 
 import {
@@ -19,8 +20,9 @@ import {
 import { STORE_KEY, emptyStore, loadStore, saveStore } from '../lib/storage';
 import { seedStore } from '../lib/seed';
 import { snapshotsOf, latestSnapshot } from '../lib/snapshots';
+import { EMBEDDED_CG_API_KEY } from '../lib/api/coingecko';
 
-import { Panel, Pill, EditableText, SectorBadge } from '../components/ui';
+import { Panel, Pill, EditableText, SectorBadge, Modal } from '../components/ui';
 
 export function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, onResetSeed }) {
   const managerById = useMemo(() => Object.fromEntries(store.managers.map(m => [m.id, m])), [store.managers]);

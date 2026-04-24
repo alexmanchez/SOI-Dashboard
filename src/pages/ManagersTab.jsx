@@ -4,12 +4,13 @@ import { Briefcase, ChevronRight, TrendingUp } from 'lucide-react';
 
 import {
   PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, ACCENT_2, GREEN, RED,
+  ACCENT, ACCENT_2, GREEN, RED, VIOLET,
 } from '../lib/theme';
-import { fmtCurrency, fmtPct, fmtPctSigned, fundLabel } from '../lib/format';
+import { fmtCurrency, fmtPct, fmtPctSigned, fmtMoic, fundLabel } from '../lib/format';
+import { sectorOf, resolveSector } from '../lib/sectors';
 import { RANGES, rangeToStartMs } from '../lib/ranges';
-import { snapshotsOf, latestSnapshot } from '../lib/snapshots';
-import { buildNAVSeries } from '../lib/rollup';
+import { snapshotsOf, latestSnapshot, isLiquid } from '../lib/snapshots';
+import { buildNAVSeries, buildNAVSeriesSimple } from '../lib/rollup';
 import { Panel } from '../components/ui';
 import { MiniSparkline } from '../components/MiniSparkline';
 

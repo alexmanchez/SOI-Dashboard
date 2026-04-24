@@ -1,13 +1,17 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import _ from 'lodash';
+import { TrendingUp } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 import {
   PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, GREEN, RED,
+  ACCENT, GREEN, RED, VIOLET,
 } from '../lib/theme';
 import { fmtCurrency, fmtPct, fmtMoic } from '../lib/format';
 import { latestSnapshot, isLiquid } from '../lib/snapshots';
-import { Panel, KPI } from '../components/ui';
+import {
+  Panel, KPI, SectorBadge, LiquidityBadge, ChangeCell,
+} from '../components/ui';
 import { PerformanceChart } from '../components/PerformanceChart';
 import {
   CompactSectorTilt, CompactManagerBreakdown,

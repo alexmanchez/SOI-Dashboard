@@ -7,7 +7,7 @@ import { RefreshCw, AlertCircle } from 'lucide-react';
 
 import {
   PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
-  ACCENT, GREEN, RED,
+  ACCENT, GREEN, RED, GOLD,
 } from '../lib/theme';
 import { fmtCurrency, fmtPctSigned } from '../lib/format';
 import { RANGES, rangeToStartMs, rangeToDays } from '../lib/ranges';

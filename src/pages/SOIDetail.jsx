@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import _ from 'lodash';
 import {
-  ArrowLeft, Edit2, X, Check, Plus, Trash2,
+  ArrowLeft, Edit2, X, Check, Plus, Trash2, RefreshCw,
   Calendar, ChevronDown, ChevronRight,
 } from 'lucide-react';
 
@@ -19,7 +19,7 @@ import { OpenTokenDetailContext } from '../contexts';
 
 import {
   Panel, Pill, EditableText, SectorBadge, LiquidityBadge, ChangeCell, SortHead,
-  ManagerSocials,
+  ManagerSocials, KPI, NumField, Stat,
 } from '../components/ui';
 import { TokenIcon } from '../components/TokenIcon';
 import { PerformanceChart } from '../components/PerformanceChart';
@@ -28,6 +28,7 @@ import {
   LiquidityBreakdownPanel,
 } from '../components/DashboardPanels';
 import { PositionEditor } from './PositionEditor';
+import { ImportWizard } from '../import/ImportWizard';
 
 export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey }) {
   const soi = store.soIs.find(s => s.id === soiId);

@@ -3,8 +3,8 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import _ from 'lodash';
 import {
-  Upload, FileSpreadsheet, ArrowLeft, Check, X, AlertCircle,
-  ChevronDown, ChevronRight,
+  Upload, FileSpreadsheet, ArrowLeft, Check, X, AlertCircle, Edit2, Plus, Trash2,
+  ChevronDown, ChevronRight, RefreshCw,
 } from 'lucide-react';
 
 import {
@@ -12,12 +12,14 @@ import {
   ACCENT, ACCENT_2, GREEN, RED, GOLD,
 } from '../lib/theme';
 import { fmtCurrency, fmtNum, uid, today, fundLabel } from '../lib/format';
-import { getSectors } from '../lib/sectors';
+import {
+  DEFAULT_TOKEN_SECTOR, UNCLASSIFIED, getSectors,
+} from '../lib/sectors';
 import {
   FIELDS, SUBTOTAL_PATTERNS, normalize, parseNum, parseDate,
   autoMapColumns, detectHeaderRow, dedupeHeaders,
 } from '../lib/parsing';
-import { latestSnapshot } from '../lib/snapshots';
+import { snapshotsOf, latestSnapshot } from '../lib/snapshots';
 
 import { Modal, ChoiceCard } from '../components/ui';
 

@@ -1,4 +1,5 @@
 import React, { useContext, useMemo, useState } from 'react';
+import _ from 'lodash';
 import { Search, ArrowLeft } from 'lucide-react';
 
 import {
@@ -7,11 +8,11 @@ import {
 } from '../lib/theme';
 import { fmtCurrency, fmtPct, fmtNum, fundLabel } from '../lib/format';
 import { getSectors, sectorOf } from '../lib/sectors';
-import { latestSnapshot, isLiquid } from '../lib/snapshots';
+import { snapshotsOf, latestSnapshot, isLiquid } from '../lib/snapshots';
 import { OpenTokenDetailContext } from '../contexts';
 
 import {
-  Panel, Pill, SectorBadge, LiquidityBadge, SortHead,
+  Panel, Pill, SectorBadge, LiquidityBadge, SortHead, ChangeCell,
 } from '../components/ui';
 import { TokenIcon } from '../components/TokenIcon';
 

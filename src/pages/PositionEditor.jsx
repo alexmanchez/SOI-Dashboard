@@ -2,14 +2,16 @@ import React, { useState } from 'react';
 import { X, Check, Trash2 } from 'lucide-react';
 
 import {
-  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
+  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
   ACCENT, GREEN, RED,
 } from '../lib/theme';
 import { fmtCurrency, uid } from '../lib/format';
 import { getSectors } from '../lib/sectors';
+import { liquidityOverrideOf } from '../lib/snapshots';
+import { parseNum } from '../lib/parsing';
 
 import {
-  Field, TextInput, NumField, Stat, Select, LiquidityBadge, SectorBadge,
+  Field, TextInput, NumField, Stat, Select, LiquidityBadge, SectorBadge, Modal,
 } from '../components/ui';
 
 export function PositionEditor({ mode, position, onCancel, onSave }) {

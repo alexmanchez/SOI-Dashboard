@@ -120,7 +120,7 @@ export default function App() {
       })();
     }
     return () => { cancelled = true; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
   const tokenImagesCtx = useMemo(() => ({ crMap, cmcIdMap }), [crMap, cmcIdMap]);
 
   /* Compute grouped search results across portfolios / managers / positions.
@@ -162,7 +162,7 @@ export default function App() {
   useEffect(() => {
     const onMgrOrVint = selection.kind === 'manager' || selection.kind === 'vintage' || !!drilldownSoi;
     if (onMgrOrVint && subPage === 'fund-economics') setSubPage('dashboard');
-  }, [selection, drilldownSoi]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selection, drilldownSoi]);
   const [range, setRange] = useState('SI');
 
   // Live prices (in-memory only; re-fetch on demand)

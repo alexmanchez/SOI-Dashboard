@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { DollarSign } from 'lucide-react';
 import _ from 'lodash';
 
@@ -8,7 +8,7 @@ import {
 } from '../lib/theme';
 import { fmtCurrency, fmtPct, fmtMoic, fundLabel } from '../lib/format';
 import { latestSnapshot, isLiquid } from '../lib/snapshots';
-import { Panel, PlaceholderPage } from '../components/ui';
+import { Panel, PlaceholderPage, KPI } from '../components/ui';
 
 export function FundEconomicsPage({ rollup, store, selection, clientShareMode }) {
   const commits = useMemo(() => {

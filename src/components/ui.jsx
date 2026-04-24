@@ -9,6 +9,7 @@ import {
   ACCENT, ACCENT_2, GREEN, RED, GOLD,
 } from '../lib/theme';
 import { fmtCurrency, fmtPctSigned } from '../lib/format';
+import { parseNum } from '../lib/parsing';
 import { sectorOf } from '../lib/sectors';
 
 export const Panel = ({ children, className='', style={}, ...rest }) => (
