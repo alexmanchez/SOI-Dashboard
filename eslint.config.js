@@ -38,7 +38,7 @@ export default [
       'react-hooks/purity': 'error',
       'react-hooks/refs': 'off',
       'react-hooks/immutability': 'off',
-      'react-hooks/preserve-manual-memoization': 'off',
+      'react-hooks/preserve-manual-memoization': 'error',
       'react-hooks/error-boundaries': 'off',
       'no-unused-vars': 'off',
       'no-useless-escape': 'off',

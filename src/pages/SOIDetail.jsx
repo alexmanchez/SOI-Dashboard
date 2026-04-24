@@ -52,7 +52,10 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
     ? (snaps.find(s => s.id === selectedSnapId) || latestSnapshot(soi) || snaps[0])
     : null;
 
-  // Build enriched positions for this one SOI
+  // Build enriched positions for this one SOI.
+  // Store objects (selectedSnap) are updated immutably via updateStore, so
+  // reference equality on the deps correctly triggers re-memoization. The
+  // compiler can't verify that, so we suppress its pre-optimization bailout.
   const rows = useMemo(() => {
     return (selectedSnap?.positions || []).map(p => {
       const sectorId = resolveSector(p, store.sectorOverrides);
@@ -67,6 +70,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
         hasLivePrice: useLive,
       };
     });
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- see comment above
   }, [selectedSnap, store.sectorOverrides, livePrices]);
 
   const totalNAV = _.sumBy(rows, 'currentValue');
@@ -75,6 +79,8 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
   const illiquidNAV = _.sumBy(rows.filter(r=>!r.liquid), 'currentValue');
 
   // Minimal rollup object for shared panels (LiquidityBreakdownPanel, TopMoversPanel).
+  // Same immutable-update guarantee as above: `soi` only changes reference
+  // when the store is updated via updateStore, which shallow-copies it.
   const fundRollup = useMemo(() => {
     const enriched = rows.map(r => ({ ...r, managerName: manager?.name, vintage: soi?.vintage, soiId: soi?.id }));
     const byTok = {};
@@ -107,6 +113,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
       totalNAV, liquidNAV, illiquidNAV,
       liquidPct: totalNAV > 0 ? (liquidNAV / totalNAV) * 100 : 0,
     };
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- see comment above
   }, [rows, manager, soi, totalNAV, liquidNAV, illiquidNAV]);
 
   if (!soi) return null;
