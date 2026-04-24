@@ -285,7 +285,10 @@ export default function App() {
   }, [selection, store.commitments, store.soIs, clientShareMode]);
 
   // Rollup for current selection
-  const rollup = useMemo(() => computeRollup(store, selection, livePrices, scaleBy), [store, selection, livePrices, scaleBy]);
+  const rollup = useMemo(
+    () => computeRollup(store, selection, livePrices, scaleBy, asOfDate),
+    [store, selection, livePrices, scaleBy, asOfDate]
+  );
 
   // Selection label
   const selectionLabel = useMemo(() => {

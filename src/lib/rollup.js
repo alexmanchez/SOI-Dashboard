@@ -1,5 +1,5 @@
 import _ from 'lodash';
-import { snapshotsOf, latestSnapshot, sortedSnapshots, isLiquid } from './snapshots';
+import { snapshotsOf, latestSnapshot, snapshotAsOf, sortedSnapshots, isLiquid } from './snapshots';
 import { resolveSector, sectorOf, getSectors } from './sectors';
 
 export const getSelectedSOIs = (store, selection) => {
@@ -13,9 +13,10 @@ export const getSelectedSOIs = (store, selection) => {
   return [];
 };
 
-export const computeRollup = (store, selection, livePrices, scaleBy = null) => {
+export const computeRollup = (store, selection, livePrices, scaleBy = null, asOfDate = null) => {
   const soIs = getSelectedSOIs(store, selection);
   const managerById = Object.fromEntries(store.managers.map(m => [m.id, m]));
+  const snapFor = (soi) => snapshotAsOf(soi, asOfDate);
 
   // Per-position enrichment
   const enriched = [];
@@ -46,7 +47,7 @@ export const computeRollup = (store, selection, livePrices, scaleBy = null) => {
     if (isFoF && selection.kind === 'client') {
       const clientCommitment = store.commitments.find(c => c.clientId === selection.id && c.soiId === soi.id);
       if (!clientCommitment) continue;
-      const subCommitments = latestSnapshot(soi)?.subCommitments || [];
+      const subCommitments = snapFor(soi)?.subCommitments || [];
       const fofTotalCalled = _.sumBy(subCommitments, s => s.called || 0);
       if (!subCommitments.length || fofTotalCalled <= 0) continue;
 
@@ -62,7 +63,7 @@ export const computeRollup = (store, selection, livePrices, scaleBy = null) => {
           console.warn('Catena: nested FoF beyond 1 level — skipping', sub.toSoiId);
           continue;
         }
-        const underlyingPositions = latestSnapshot(targetSoi)?.positions || [];
+        const underlyingPositions = snapFor(targetSoi)?.positions || [];
         const underlyingMV = _.sumBy(underlyingPositions, p => p.soiMarketValue || 0);
         if (underlyingMV <= 0) continue;
         const fofShare = (sub.called || 0) / underlyingMV;
@@ -88,7 +89,7 @@ export const computeRollup = (store, selection, livePrices, scaleBy = null) => {
 
     // Direct SOI (existing logic)
     const scale = scaleBy ? (scaleBy(soi) ?? 1) : 1;
-    for (const p of (latestSnapshot(soi)?.positions || [])) {
+    for (const p of (snapFor(soi)?.positions || [])) {
       const sectorId = resolveSector(p, store.sectorOverrides);
       const liquid = isLiquid(p);
       enrichPosition(p, {
@@ -182,7 +183,7 @@ export const computeRollup = (store, selection, livePrices, scaleBy = null) => {
       soiId, managerId: soi.managerId, managerName: manager?.name, vintage: soi.vintage,
       value, pct: totalNAV > 0 ? (value/totalNAV)*100 : 0,
       positionCount: items.length,
-      asOfDate: latestSnapshot(soi)?.asOfDate,
+      asOfDate: snapFor(soi)?.asOfDate,
       _scale: items[0]?._scale ?? 1,
     };
   }).sort((a,b) => b.value - a.value);
