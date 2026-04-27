@@ -1,9 +1,9 @@
 import {
-  useMemo, useState,
+  Fragment, useMemo, useState,
 } from 'react';
 import _ from 'lodash';
 import {
-  Search,
+  Search, Layers,
 } from 'lucide-react';
 
 import {
@@ -27,6 +27,7 @@ export function PositionsTab({ rollup, store: _store, updateStore }) {
   const [liquidityFilter, setLiquidityFilter] = useState('all');
   const [sortBy, setSortBy] = useState('value');
   const [sortDir, setSortDir] = useState('desc');
+  const [groupBySector, setGroupBySector] = useState(false);
 
   const rows = useMemo(() => {
     let r = rollup.tokenRollup;
@@ -44,6 +45,22 @@ export function PositionsTab({ rollup, store: _store, updateStore }) {
     if (sortBy === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
     else { setSortBy(col); setSortDir('desc'); }
   };
+
+  // Grouped layout: bucket rows by sectorId, sort sectors by aggregate value desc.
+  const grouped = useMemo(() => {
+    if (!groupBySector) return null;
+    const total = _.sumBy(rows, (r) => r.value || 0);
+    const byId = {};
+    for (const r of rows) {
+      const id = r.sectorId || 'unclassified';
+      if (!byId[id]) byId[id] = { id, rows: [], total: 0 };
+      byId[id].rows.push(r);
+      byId[id].total += r.value || 0;
+    }
+    return Object.values(byId)
+      .map((g) => ({ ...g, pct: total > 0 ? (g.total / total) * 100 : 0 }))
+      .sort((a, b) => b.total - a.total);
+  }, [rows, groupBySector]);
 
   // Toggle liquidity on EVERY SAFT-type position with this ticker in the store
   const flipForceLiquid = (tokenKey, newValue) => {
@@ -108,6 +125,18 @@ export function PositionsTab({ rollup, store: _store, updateStore }) {
           <option value="liquid">Liquid only</option>
           <option value="illiquid">Illiquid only</option>
         </select>
+        <button
+          onClick={() => setGroupBySector((g) => !g)}
+          className="text-xs px-2 py-1 rounded flex items-center gap-1"
+          style={{
+            backgroundColor: groupBySector ? GOLD + '22' : 'transparent',
+            color: groupBySector ? GOLD : TEXT_DIM,
+            border: `1px solid ${groupBySector ? GOLD + '44' : BORDER}`,
+          }}
+          title="Group rows by sector"
+        >
+          <Layers size={12} /> {groupBySector ? 'Grouped' : 'Group by sector'}
+        </button>
         <div className="text-xs" style={{color:TEXT_DIM}}>{rows.length} tokens</div>
       </Panel>
       <Panel className="p-0 overflow-hidden">
@@ -125,47 +154,80 @@ export function PositionsTab({ rollup, store: _store, updateStore }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map(t => (
-                <tr key={t.key} style={{ borderBottom: `1px solid ${BORDER}` }}>
-                  <td className="px-3 py-2.5">
-                    <div className="font-medium">{t.symbol || t.name}</div>
-                    {t.symbol && t.name !== t.symbol && <div className="text-[10px]" style={{color:TEXT_MUTE}}>{t.name}</div>}
-                    <div className="text-[10px] mt-0.5" style={{color:TEXT_MUTE}}>
-                      {t.managers.slice(0,2).join(' • ')}{t.managers.length>2 ? ` +${t.managers.length-2}` : ''}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <select value={t.sectorId} onChange={e=>changeSector(t.key, e.target.value)}
-                      className="text-xs px-1.5 py-0.5 rounded outline-none"
-                      style={{ backgroundColor: 'transparent', color: sectorOf(t.sectorId).color, border: `1px solid ${sectorOf(t.sectorId).color}44` }}>
-                      {getSectors().map(s => <option key={s.id} value={s.id} style={{backgroundColor:PANEL, color:TEXT}}>{s.label}</option>)}
-                      <option value="unclassified" style={{backgroundColor:PANEL, color:TEXT}}>Unclassified</option>
-                    </select>
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums"><ChangeCell value={t.change24h} /></td>
-                  <td className="px-3 py-2.5 text-right tabular-nums font-medium">{fmtCurrency(t.value)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{fmtPct(t.pct, 2)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums" style={{color:TEXT_DIM}}>{t.managerCount}</td>
-                  <td className="px-3 py-2.5 text-right">
-                    <button onClick={()=>flipForceLiquid(t.key, !t.forceLiquid)}
-                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded"
-                      style={{
-                        backgroundColor: t.liquid ? GREEN+'22' : GOLD+'22',
-                        color: t.liquid ? GREEN : GOLD,
-                        border: `1px solid ${t.liquid ? GREEN+'44' : GOLD+'44'}`,
-                      }}
-                      title={t.forceLiquid ? 'Click to revert to snapshot treatment' : 'Mark as liquid (TGE\'d)'}>
-                      {t.liquid ? 'Liquid' : 'Illiquid'}
-                      {t.forceLiquid && <span style={{opacity:0.7}}>•</span>}
-                    </button>
-                  </td>
-                </tr>
+              {!groupBySector && rows.map((t) => (
+                <PositionRow key={t.key} t={t} changeSector={changeSector} flipForceLiquid={flipForceLiquid} indent={false} />
               ))}
+              {groupBySector && grouped && grouped.map((g) => {
+                const sec = sectorOf(g.id);
+                return (
+                  <Fragment key={g.id}>
+                    <tr style={{ backgroundColor: sec.color + '11', borderTop: `2px solid ${sec.color}55`, borderBottom: `1px solid ${BORDER}` }}>
+                      <td className="px-3 py-2" colSpan={3}>
+                        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: sec.color }}>
+                          {sec.label}
+                        </span>
+                        <span className="text-[10px] ml-2" style={{ color: TEXT_MUTE }}>
+                          {g.rows.length} {g.rows.length === 1 ? 'token' : 'tokens'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums font-medium" style={{ color: TEXT }}>
+                        {fmtCurrency(g.total)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums" style={{ color: TEXT_DIM }}>
+                        {fmtPct(g.pct, 2)}
+                      </td>
+                      <td colSpan={2} />
+                    </tr>
+                    {g.rows.map((t) => (
+                      <PositionRow key={t.key} t={t} changeSector={changeSector} flipForceLiquid={flipForceLiquid} indent={true} />
+                    ))}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </Panel>
     </div>
+  );
+}
+
+function PositionRow({ t, changeSector, flipForceLiquid, indent }) {
+  return (
+    <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+      <td className="px-3 py-2.5" style={{ paddingLeft: indent ? 32 : undefined }}>
+        <div className="font-medium">{t.symbol || t.name}</div>
+        {t.symbol && t.name !== t.symbol && <div className="text-[10px]" style={{ color: TEXT_MUTE }}>{t.name}</div>}
+        <div className="text-[10px] mt-0.5" style={{ color: TEXT_MUTE }}>
+          {t.managers.slice(0,2).join(' • ')}{t.managers.length>2 ? ` +${t.managers.length-2}` : ''}
+        </div>
+      </td>
+      <td className="px-3 py-2.5">
+        <select value={t.sectorId} onChange={(e) => changeSector(t.key, e.target.value)}
+          className="text-xs px-1.5 py-0.5 rounded outline-none"
+          style={{ backgroundColor: 'transparent', color: sectorOf(t.sectorId).color, border: `1px solid ${sectorOf(t.sectorId).color}44` }}>
+          {getSectors().map((s) => <option key={s.id} value={s.id} style={{ backgroundColor: PANEL, color: TEXT }}>{s.label}</option>)}
+          <option value="unclassified" style={{ backgroundColor: PANEL, color: TEXT }}>Unclassified</option>
+        </select>
+      </td>
+      <td className="px-3 py-2.5 text-right tabular-nums"><ChangeCell value={t.change24h} /></td>
+      <td className="px-3 py-2.5 text-right tabular-nums font-medium">{fmtCurrency(t.value)}</td>
+      <td className="px-3 py-2.5 text-right tabular-nums">{fmtPct(t.pct, 2)}</td>
+      <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: TEXT_DIM }}>{t.managerCount}</td>
+      <td className="px-3 py-2.5 text-right">
+        <button onClick={() => flipForceLiquid(t.key, !t.forceLiquid)}
+          className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded"
+          style={{
+            backgroundColor: t.liquid ? GREEN + '22' : GOLD + '22',
+            color: t.liquid ? GREEN : GOLD,
+            border: `1px solid ${t.liquid ? GREEN + '44' : GOLD + '44'}`,
+          }}
+          title={t.forceLiquid ? 'Click to revert to snapshot treatment' : "Mark as liquid (TGE'd)"}>
+          {t.liquid ? 'Liquid' : 'Illiquid'}
+          {t.forceLiquid && <span style={{ opacity: 0.7 }}>•</span>}
+        </button>
+      </td>
+    </tr>
   );
 }
 

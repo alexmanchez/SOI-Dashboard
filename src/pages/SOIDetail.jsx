@@ -3,7 +3,7 @@ import {
 } from 'react';
 import _ from 'lodash';
 import {
-  ArrowLeft, Trash2, RefreshCw,
+  ArrowLeft, Trash2, RefreshCw, Plus,
 } from 'lucide-react';
 
 import {
@@ -32,7 +32,7 @@ import { PositionEditor } from './PositionEditor';
 import { ImportWizard } from '../import/ImportWizard';
 import { PositionGrid } from '../components/PositionGrid';
 
-export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey }) {
+export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, view, onCreateSnapshot }) {
   const soi = store.soIs.find(s => s.id === soiId);
   const manager = store.managers.find(m => m.id === soi?.managerId);
   const [editingPosition, setEditingPosition] = useState(null); // {mode: 'add'|'edit', position?}
@@ -251,6 +251,12 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
     }));
   };
 
+  // Per-fund sub-tab routing — when `view` is undefined every section
+  // renders (legacy callers still get the full dashboard).
+  const showHoldings = !view || view === 'holdings';
+  const showEconomics = !view || view === 'economics';
+  const showPositions = !view || view === 'positions';
+
   return (
     <div className="space-y-4">
       <button onClick={onBack} className="text-xs flex items-center gap-1 hover:underline" style={{color:TEXT_DIM}}>
@@ -279,11 +285,27 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
                     <Trash2 size={10}/> Delete snapshot
                   </button>
                 )}
+                {onCreateSnapshot && (
+                  <button onClick={() => onCreateSnapshot(soi.id)}
+                    className="text-xs px-2 py-1 rounded flex items-center gap-1"
+                    style={{color:ACCENT_2, border:`1px solid ${ACCENT_2}44`}}>
+                    <Plus size={10}/> New snapshot
+                  </button>
+                )}
               </div>
             ) : (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{color:GOLD, backgroundColor:GOLD+'11', border:`1px solid ${GOLD}44`}}>
-                As of {selectedSnap?.asOfDate || '—'}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{color:GOLD, backgroundColor:GOLD+'11', border:`1px solid ${GOLD}44`}}>
+                  As of {selectedSnap?.asOfDate || '—'}
+                </span>
+                {onCreateSnapshot && (
+                  <button onClick={() => onCreateSnapshot(soi.id)}
+                    className="text-xs px-2 py-1 rounded flex items-center gap-1"
+                    style={{color:ACCENT_2, border:`1px solid ${ACCENT_2}44`}}>
+                    <Plus size={10}/> New snapshot
+                  </button>
+                )}
+              </div>
             )}
             <span>{rows.length} positions</span>
           </div>
@@ -299,7 +321,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
         </div>
       </div>
 
-      {/* Performance chart */}
+      {showHoldings && (
       <PerformanceChart
         soiBundles={[soi]}
         priceHistory={priceHistory}
@@ -312,15 +334,18 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
         title={`${manager?.name} ${soi.vintage} performance`}
         height={240}
       />
+      )}
 
+      {showHoldings && (
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KPI label="NAV" value={fmtCurrency(totalNAV)} />
         <KPI label="Positions" value={rows.length} />
         <KPI label="Liquid" value={fmtCurrency(liquidNAV)} sub={fmtPct(totalNAV>0?(liquidNAV/totalNAV)*100:0,1)} />
         <KPI label="Illiquid" value={fmtCurrency(illiquidNAV)} sub={fmtPct(totalNAV>0?(illiquidNAV/totalNAV)*100:0,1)} />
       </div>
+      )}
 
-      {(() => {
+      {showEconomics && (() => {
         const commitment = store.commitments.find(c => c.soiId === soi.id);
         if (!commitment) {
           return (
@@ -371,7 +396,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
       })()}
 
       {/* Underlying Commitments — only shown for FoF SOIs */}
-      {manager?.type === 'fund_of_funds' && (() => {
+      {showEconomics && manager?.type === 'fund_of_funds' && (() => {
         const subCommitments = selectedSnap?.subCommitments || [];
         const fofTotalCalled = _.sumBy(subCommitments, s => s.called || 0);
         return (
@@ -428,6 +453,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
         );
       })()}
 
+      {showHoldings && (
       <Panel className="p-5">
         <div className="text-xs uppercase tracking-wider mb-3" style={{color:TEXT_MUTE}}>Sector tilt</div>
         <div className="flex h-3 rounded-full overflow-hidden mb-3" style={{backgroundColor:PANEL_2}}>
@@ -445,17 +471,18 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
           ))}
         </div>
       </Panel>
+      )}
 
-      {/* Fund-scoped movers + liquidity (replaces the self-referential
-          "exposure by vintage" panel that would just restate this fund). */}
+      {showHoldings && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
           <TopMoversPanel rollup={fundRollup} priceHistory={priceHistory} />
         </div>
         <LiquidityBreakdownPanel rollup={fundRollup} />
       </div>
+      )}
 
-      {/* Positions grid (spreadsheet-style editor; see components/PositionGrid) */}
+      {showPositions && (
       <PositionGrid
         positions={rows}
         editMode={gridEditMode}
@@ -473,6 +500,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
           </button>
         }
       />
+      )}
 
 
       {editingPosition && (

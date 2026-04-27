@@ -20,12 +20,9 @@ import {
   CompactSectorTilt, CompactManagerBreakdown,
   TopHoldingsPanel, TopMoversPanel,
 } from '../components/DashboardPanels';
-import { TimeSlider } from '../components/TimeSlider';
 import { AsOfPill } from '../components/AsOfPill';
-import { distinctSnapshotDates } from '../lib/snapshots';
 
-export function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, clientShareMode, scaleBy, updateStore, asOfDate, setAsOfDate }) {
-  const snapshotDates = useMemo(() => distinctSnapshotDates(rollup.soIs), [rollup.soIs]);
+export function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, clientShareMode, scaleBy, updateStore, asOfDate }) {
   // Latest snapshot date across the current selection — used as the "as of"
   // label on panels so an OCIO can see at a glance when the underlying holdings
   // data was last refreshed.
@@ -60,13 +57,6 @@ export function OverviewTab({ rollup, store, selection, priceHistory, historyLoa
       <div className="flex items-center gap-3 flex-wrap">
         <AsOfPill dates={(rollup.managerBreakdown || []).map((m) => m.asOfDate)} />
       </div>
-      {snapshotDates.length > 1 && (
-        <TimeSlider
-          dates={snapshotDates}
-          value={asOfDate}
-          onChange={setAsOfDate}
-        />
-      )}
 
       {/* PERFORMANCE CHART */}
       <PerformanceChart
