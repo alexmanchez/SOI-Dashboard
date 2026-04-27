@@ -17,7 +17,7 @@ import {
   rangeToStartMs,
 } from '../lib/ranges';
 import {
-  latestSnapshot, isLiquid, distinctSnapshotDates, earliestSnapshotDate,
+  latestSnapshot, isLiquid, earliestSnapshotDate,
 } from '../lib/snapshots';
 import {
   buildNAVSeriesSimple,
@@ -26,13 +26,12 @@ import { Panel } from '../components/ui';
 import {
   MiniSparkline,
 } from '../components/MiniSparkline';
-import { TimeSlider } from '../components/TimeSlider';
 import { AsOfPill } from '../components/AsOfPill';
 
 // Wrapping Date.now so react-hooks/purity doesn't flag the refresh below.
 const nowFn = () => Date.now();
 
-export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clientShareMode, scaleBy: _scaleBy, asOfDate, setAsOfDate }) {
+export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clientShareMode, scaleBy: _scaleBy }) {
   // Stable "now" for sparklines; refresh via setState-during-render when
   // the user changes the range pill.
   const [nowMs, setNowMs] = useState(nowFn);
@@ -42,7 +41,6 @@ export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKe
     setNowMs(nowFn());
   }
 
-  const snapshotDates = useMemo(() => distinctSnapshotDates(rollup.soIs), [rollup.soIs]);
 
   /* Merge the rollup's manager breakdown (which only includes SOIs that have
      positions at asOfDate) with the full scoped SOI list, so "not yet funded"
@@ -78,13 +76,6 @@ export function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKe
       <div className="flex items-center gap-3 flex-wrap">
         <AsOfPill dates={(rollup.managerBreakdown || []).map((r) => r.asOfDate)} />
       </div>
-      {snapshotDates.length > 1 && (
-        <TimeSlider
-          dates={snapshotDates}
-          value={asOfDate}
-          onChange={setAsOfDate}
-        />
-      )}
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       {cards.map(m => {
         if (m.notYetFunded) {

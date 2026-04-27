@@ -475,7 +475,21 @@ export function PositionGrid({
           <thead>{headerRow}</thead>
           <tbody>
             {sorted.map((p) => (
-              <tr key={p.id}>
+              <tr
+                key={p.id}
+                style={{
+                  // Subtle accent tint when this row's current value is computed
+                  // from a live price (simulated) rather than the snapshot's
+                  // recorded soiMarketValue (manager-marked). Snap Px / Cost /
+                  // Value columns always show the manager's snapshot data;
+                  // MOIC and % NAV use the live-derived current value when
+                  // available.
+                  backgroundColor: p.hasLivePrice ? ACCENT + '0c' : 'transparent',
+                }}
+                title={p.hasLivePrice
+                  ? 'Simulated · MOIC and % NAV computed from live price for this token. Snapshot values (Snap Px / Cost / Value) remain manager-marked.'
+                  : 'Manager-marked · all values from this snapshot.'}
+              >
                 {COLUMNS.map((col) => renderCell(p, col))}
                 {editMode && (
                   <td className="px-3 py-2 text-right" style={{ borderBottom: `1px solid ${BORDER}` }}>
@@ -524,6 +538,15 @@ export function PositionGrid({
         </table>
       </div>
 
+      {sorted.some((p) => p.hasLivePrice) && (
+        <div
+          className="px-4 py-2 text-[10px] flex items-center gap-2"
+          style={{ color: TEXT_MUTE, borderTop: `1px solid ${BORDER}` }}
+        >
+          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, backgroundColor: ACCENT + '33', border: `1px solid ${ACCENT}55` }} />
+          Tinted rows use live prices — MOIC and % NAV are simulated; Snap Px / Cost / Value remain manager-marked from the snapshot.
+        </div>
+      )}
       {editMode && (
         <div
           className="px-4 py-2 text-[10px]"

@@ -14,6 +14,7 @@ import {
 import { fmtCurrency, fmtNum, fmtPctSigned, fundLabel } from '../lib/format';
 import { latestSnapshot } from '../lib/snapshots';
 import { fetchCoinDetail, fetchCoinChart } from '../lib/api/coingecko';
+import { fetchProtocols, findProtocolMatch } from '../lib/api/defillama';
 import { DETAIL_RANGES } from '../lib/ranges';
 
 import { Pill } from './ui';
@@ -84,6 +85,28 @@ export function TokenDetailDrawer({ token, onClose, apiKey, store }) {
     })();
     return () => { cancelled = true; };
   }, [token?.cgTokenId, range, apiKey]);
+
+  // Protocol TVL — match this token to a DefiLlama protocol by symbol/name.
+  // Fetched once per hour and cached in localStorage; the global list isn't
+  // tied to apiKey since DefiLlama is unauthenticated.
+  const [protocol, setProtocol] = useState(null);
+  useEffect(() => {
+    if (!token) {
+      setProtocol(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchProtocols();
+      if (cancelled) return;
+      const match = findProtocolMatch(data, {
+        symbol: token.symbol || token.ticker,
+        name: token.name,
+      });
+      setProtocol(match);
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
 
   const m = coin?.market_data;
   const price = m?.current_price?.usd ?? null;
@@ -291,6 +314,41 @@ export function TokenDetailDrawer({ token, onClose, apiKey, store }) {
                   value={m?.price_change_percentage_7d != null ? fmtPctSigned(m.price_change_percentage_7d, 2) : '–'} />
               </div>
             </div>
+
+            {protocol && (
+              <div style={{ padding: 20, borderBottom: `1px solid ${BORDER}` }}>
+                <div className="flex items-baseline justify-between mb-3">
+                  <div className="text-xs uppercase tracking-wider" style={{ color: TEXT_MUTE }}>
+                    Protocol TVL · DefiLlama
+                  </div>
+                  <div className="text-[10px]" style={{ color: TEXT_DIM }}>
+                    {protocol.name}{protocol.category ? ` · ${protocol.category}` : ''}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>TVL</div>
+                    <div className="text-base font-semibold tabular-nums mt-0.5" style={{ color: TEXT }}>
+                      {fmtCurrency(protocol.tvl)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>1d</div>
+                    <div className="text-base font-medium tabular-nums mt-0.5"
+                      style={{ color: protocol.change_1d == null ? TEXT_DIM : (protocol.change_1d >= 0 ? GREEN : RED) }}>
+                      {protocol.change_1d == null ? '—' : fmtPctSigned(protocol.change_1d, 2)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>7d</div>
+                    <div className="text-base font-medium tabular-nums mt-0.5"
+                      style={{ color: protocol.change_7d == null ? TEXT_DIM : (protocol.change_7d >= 0 ? GREEN : RED) }}>
+                      {protocol.change_7d == null ? '—' : fmtPctSigned(protocol.change_7d, 2)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {coin.links && (
               <div style={{ padding: 20, borderBottom: `1px solid ${BORDER}` }}>

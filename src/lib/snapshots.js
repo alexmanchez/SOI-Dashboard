@@ -67,3 +67,38 @@ export const liquidityOverrideOf = (position) => {
   if (position.forceLiquid) return 'liquid';
   return 'auto';
 };
+
+// ----------------------------------------------------------------------------
+// Snapshot lifecycle helpers (Task 1)
+// ----------------------------------------------------------------------------
+
+const newSnapshotId = () => 's_' + Math.random().toString(36).slice(2, 10);
+const deepCopySnapshotData = (x) => JSON.parse(JSON.stringify(x ?? null));
+
+/* Build a new draft snapshot by deep-copying positions and subCommitments
+   from `baseSnapshotId`. Pure — does not mutate `soi`. Returns the new
+   snapshot; caller appends it to soi.snapshots via updateStore.
+   Throws if `newAsOfDate` already exists on this SOI. */
+export const cloneSnapshot = (soi, baseSnapshotId, newAsOfDate) => {
+  const snaps = snapshotsOf(soi);
+  if (snaps.some((s) => (s.asOfDate || '') === newAsOfDate)) {
+    throw new Error(`Snapshot for ${newAsOfDate} already exists on this SOI`);
+  }
+  const base = snaps.find((s) => s.id === baseSnapshotId);
+  if (!base) throw new Error(`Base snapshot ${baseSnapshotId} not found`);
+  return {
+    id: newSnapshotId(),
+    asOfDate: newAsOfDate,
+    notes: '',
+    positions: deepCopySnapshotData(base.positions || []),
+    subCommitments: deepCopySnapshotData(base.subCommitments || []),
+    status: 'draft',
+  };
+};
+
+/* Return a new snapshots array with the target's status flipped to
+   'finalized', sorted ascending by asOfDate. Idempotent. */
+export const finalizeSnapshot = (soi, snapshotId) =>
+  snapshotsOf(soi)
+    .map((s) => (s.id === snapshotId ? { ...s, status: 'finalized' } : s))
+    .sort((a, b) => ((a.asOfDate || '') < (b.asOfDate || '') ? -1 : 1));

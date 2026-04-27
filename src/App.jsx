@@ -20,7 +20,7 @@ import {
 } from './lib/storage';
 import { seedStore } from './lib/seed';
 import {
-  latestSnapshot,
+  latestSnapshot, distinctSnapshotDates,
 } from './lib/snapshots';
 import { computeSearchResults } from './lib/search';
 import {
@@ -46,12 +46,13 @@ import {
   TokenDetailDrawer,
 } from './components/TokenDetailDrawer';
 import {
-  LeftSidebar,
+  LeftSidebar, FUND_SUB_TABS,
 } from './components/LeftSidebar';
 import { TopNav } from './components/TopNav';
 import { SearchBox } from './components/SearchBox';
 import { ContextRow } from './components/ContextRow';
 import { ScopeHeader } from './components/ScopeHeader';
+import { TimeSlider } from './components/TimeSlider';
 
 import {
   OverviewTab,
@@ -62,6 +63,8 @@ import { ManagersTab } from './pages/ManagersTab';
 import { PositionsTab } from './pages/PositionsTab';
 import { SOIDetail } from './pages/SOIDetail';
 import { SettingsDrawer } from './pages/SettingsDrawer';
+import { SnapshotEditor } from './pages/SnapshotEditor';
+import { ManagerRoundsPage } from './pages/ManagerRoundsPage';
 import { ImportWizard } from './import/ImportWizard';
 
 export default function App() {
@@ -103,6 +106,8 @@ export default function App() {
   const [flyoutSoiId, setFlyoutSoiId] = useState(null);         // which FoF SOI's underlying-commitments flyout is open
   const [subPage, setSubPage] = useState('dashboard'); // dashboard | positions | exposures | fund-economics
   const [detailToken, setDetailToken] = useState(null);
+  // Roll-forward snapshot editor — when set, renders a fullscreen overlay.
+  const [snapshotEditorSoi, setSnapshotEditorSoi] = useState(null);
 
   /* Drawer-via-URL: if the user lands on #/token/:id (or navigates with back/
      forward), open the drawer pre-loaded to that token. The drawer itself
@@ -269,6 +274,9 @@ export default function App() {
     [store, selection, livePrices, scaleBy, asOfDate]
   );
 
+  // Distinct snapshot dates across the current scope — feeds the global TimeSlider.
+  const snapshotDates = useMemo(() => distinctSnapshotDates(rollup.soIs), [rollup.soIs]);
+
   // Selection label
   const selectionLabel = useMemo(() => {
     if (selection.kind === 'firm') return 'All Clients';
@@ -409,26 +417,68 @@ export default function App() {
                 range={range}
                 onRangeChange={setRange}
                 onRequestFetch={fetchHistoryFor}
-                apiKey={effectiveApiKey} />
+                apiKey={effectiveApiKey}
+                onCreateSnapshot={(id) => setSnapshotEditorSoi(id)}
+                view="holdings" />
+            )}
+            {subPage === 'positions' && drilldownSoi && (
+              <SOIDetail
+                store={store}
+                soiId={drilldownSoi}
+                livePrices={livePrices}
+                onBack={() => setDrilldownSoi(null)}
+                updateStore={updateStore}
+                priceHistory={priceHistory}
+                historyLoading={historyLoading}
+                historyProgress={historyProgress}
+                range={range}
+                onRangeChange={setRange}
+                onRequestFetch={fetchHistoryFor}
+                apiKey={effectiveApiKey}
+                onCreateSnapshot={(id) => setSnapshotEditorSoi(id)}
+                view="positions" />
+            )}
+            {subPage === 'fund-economics' && drilldownSoi && (
+              <SOIDetail
+                store={store}
+                soiId={drilldownSoi}
+                livePrices={livePrices}
+                onBack={() => setDrilldownSoi(null)}
+                updateStore={updateStore}
+                priceHistory={priceHistory}
+                historyLoading={historyLoading}
+                historyProgress={historyProgress}
+                range={range}
+                onRangeChange={setRange}
+                onRequestFetch={fetchHistoryFor}
+                apiKey={effectiveApiKey}
+                onCreateSnapshot={(id) => setSnapshotEditorSoi(id)}
+                view="economics" />
             )}
             {subPage === 'dashboard' && !drilldownSoi && (
               <OverviewTab rollup={rollup} store={store} selection={selection}
                 priceHistory={priceHistory} historyLoading={historyLoading} historyProgress={historyProgress}
                 range={range} onRangeChange={setRange} onRequestFetch={fetchHistoryFor}
                 apiKey={effectiveApiKey} updateStore={updateStore}
-                asOfDate={asOfDate} setAsOfDate={setAsOfDate}
+                asOfDate={asOfDate}
                 clientShareMode={clientShareMode} scaleBy={scaleBy} />
             )}
-            {subPage === 'positions' && (
+            {subPage === 'positions' && !drilldownSoi && (
               <PositionsTab rollup={rollup} store={store} updateStore={updateStore} />
             )}
             {subPage === 'exposures' && (
               <ExposuresPage rollup={rollup} selection={selection} />
             )}
-            {subPage === 'fund-economics' && !onManagerOrVintage && (
+            {subPage === 'rounds' && !drilldownSoi && selection.kind === 'manager' && (
+              <ManagerRoundsPage
+                manager={store.managers.find((m) => m.id === selection.id)}
+                updateStore={updateStore}
+              />
+            )}
+            {subPage === 'fund-economics' && !drilldownSoi && !onManagerOrVintage && (
               <FundEconomicsPage rollup={rollup} store={store} selection={selection} clientShareMode={clientShareMode} />
             )}
-            {subPage === 'fund-economics' && onManagerOrVintage && (
+            {subPage === 'fund-economics' && !drilldownSoi && onManagerOrVintage && (
               <PlaceholderPage icon={DollarSign}
                 title="Fund Economics is client-scoped"
                 description="Committed / Called / MOIC / TVPI are properties of a client's commitment to this manager. Select a specific client from Portfolios to see them." />
@@ -441,7 +491,11 @@ export default function App() {
             <div className="max-w-[1600px] mx-auto flex">
               <LeftSidebar
                 subPage={subPage} setSubPage={setSubPage}
-                hiddenItems={onManagerOrVintage ? ['fund-economics'] : []}
+                setDrilldownSoi={setDrilldownSoi}
+                hiddenItems={[
+                  ...(onManagerOrVintage ? ['fund-economics'] : []),
+                  ...(selection.kind !== 'manager' || drilldownSoi ? ['rounds'] : []),
+                ]}
                 activeFundId={drilldownSoi}
                 onDrillFund={(soiId) => { setDrilldownSoi(soiId); setSubPage('dashboard'); }}
                 extraSections={(() => {
@@ -455,6 +509,10 @@ export default function App() {
                         id: soi.id,
                         label: fundLabel(soi),
                         sub: latestSnapshot(soi)?.asOfDate ? `as of ${latestSnapshot(soi).asOfDate}` : null,
+                        children: drilldownSoi === soi.id ? FUND_SUB_TABS.map((t) => ({
+                          id: t.id, label: t.label, icon: t.icon,
+                          onClick: () => setSubPage(t.id),
+                        })) : null,
                       })),
                     }];
                   }
@@ -463,13 +521,17 @@ export default function App() {
                     const drilled = store.soIs.find(s => s.id === drilldownSoi);
                     if (!drilled) return [];
                     const siblingFunds = store.soIs.filter(s => s.managerId === drilled.managerId);
-                    if (siblingFunds.length <= 1) return [];
+                    if (siblingFunds.length === 0) return [];
                     return [{
                       group: 'Funds',
                       items: siblingFunds.map(soi => ({
                         id: soi.id,
                         label: fundLabel(soi),
                         sub: latestSnapshot(soi)?.asOfDate ? `as of ${latestSnapshot(soi).asOfDate}` : null,
+                        children: drilldownSoi === soi.id ? FUND_SUB_TABS.map((t) => ({
+                          id: t.id, label: t.label, icon: t.icon,
+                          onClick: () => setSubPage(t.id),
+                        })) : null,
                       })),
                     }];
                   }
@@ -478,6 +540,11 @@ export default function App() {
               />
               <div className="flex-1 px-6 py-6 min-w-0">
                 {HeaderBlock}
+                {snapshotDates.length > 1 && (
+                  <div className="mb-4">
+                    <TimeSlider dates={snapshotDates} value={asOfDate} onChange={setAsOfDate} />
+                  </div>
+                )}
                 {rollup.positionCount > 0 && ContentForOverview}
               </div>
             </div>
@@ -488,10 +555,14 @@ export default function App() {
         return (
           <div className="max-w-[1600px] mx-auto px-6 py-6">
             {HeaderBlock}
+            {snapshotDates.length > 1 && (
+              <div className="mb-4">
+                <TimeSlider dates={snapshotDates} value={asOfDate} onChange={setAsOfDate} />
+              </div>
+            )}
             {rollup.positionCount > 0 && (
               <ManagersTab rollup={rollup} store={store} onDrill={(soiId) => setDrilldownSoi(soiId)}
                 priceHistory={priceHistory} range={range} apiKey={effectiveApiKey}
-                asOfDate={asOfDate} setAsOfDate={setAsOfDate}
                 clientShareMode={clientShareMode} scaleBy={scaleBy} />
             )}
           </div>
@@ -518,6 +589,16 @@ export default function App() {
         />
       )}
     </div>
+    {snapshotEditorSoi && (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 100, backgroundColor: BG, overflow: 'auto' }}>
+        <SnapshotEditor
+          store={store}
+          soiId={snapshotEditorSoi}
+          updateStore={updateStore}
+          onClose={() => setSnapshotEditorSoi(null)}
+        />
+      </div>
+    )}
     {detailToken && <TokenDetailDrawer token={detailToken} onClose={() => {
       setDetailToken(null);
       if (/^#\/token\//.test(window.location.hash)) {
