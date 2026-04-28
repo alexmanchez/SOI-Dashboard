@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, Plus, Save, X } from 'lucide-react';
+import { ArrowLeft, GripVertical, Plus, Save, Trash2, X } from 'lucide-react';
 
 import {
   PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
@@ -76,6 +76,10 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
   // warning for snapshots without a cash bucket (defensive).
   const residualSignificant = !cashRow && Math.abs(residual) >= 1;
 
+  // Drag-to-reorder state. Hooks must run in the same order on every render,
+  // so this stays above the early-return guard below.
+  const [dragId, setDragId] = useState(null);
+
   if (!soi || !baseSnap) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: BG, color: TEXT }}>
@@ -113,6 +117,42 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
   const updatePositionField = (id, field, value) => {
     setDraft((d) => d.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
   };
+
+  const deletePosition = (id) => {
+    const pos = draft.find((p) => p.id === id);
+    if (!pos || isCashBucket(pos)) return; // cash row is non-deletable
+    if (!window.confirm(`Remove ${pos.positionName || 'this position'} from the new snapshot?`)) return;
+    setDraft((d) => d.filter((p) => p.id !== id));
+  };
+
+  // Drag-to-reorder via HTML5 DnD. The cash row is excluded from the
+  // affordance and the move logic guards against dropping anything onto
+  // (or above) it — it stays pinned at the head of the array.
+  const onDragStart = (id) => () => {
+    setDragId(id);
+  };
+  const onDragOver = (e) => {
+    if (dragId) e.preventDefault();
+  };
+  const onDrop = (targetId) => (e) => {
+    e.preventDefault();
+    if (!dragId || dragId === targetId) { setDragId(null); return; }
+    setDraft((d) => {
+      const fromIdx = d.findIndex((p) => p.id === dragId);
+      const toIdx = d.findIndex((p) => p.id === targetId);
+      if (fromIdx < 0 || toIdx < 0) return d;
+      const moved = d[fromIdx];
+      const target = d[toIdx];
+      if (isCashBucket(moved) || isCashBucket(target)) return d;
+      const next = d.slice();
+      next.splice(fromIdx, 1);
+      const adjustedTo = next.findIndex((p) => p.id === targetId);
+      next.splice(adjustedTo, 0, moved);
+      return next;
+    });
+    setDragId(null);
+  };
+  const onDragEnd = () => setDragId(null);
 
   const handleSave = () => {
     if (!canSave) return;
@@ -224,6 +264,7 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
                   <th className="text-right px-3 py-2">TXN %</th>
                   <th className="text-right px-3 py-2" style={{ color: ACCENT }}>New NAV</th>
                   <th className="text-right px-3 py-2" style={{ color: ACCENT }}>New %</th>
+                  <th className="text-right px-3 py-2" style={{ width: 56 }} aria-label="Row actions" />
                 </tr>
               </thead>
               <tbody>
@@ -266,6 +307,7 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums font-medium" style={{ color: GOLD }}>{fmtCurrency(newNAV)}</td>
                       <td className="px-3 py-2 text-right tabular-nums" style={{ color: GOLD }}>{fmtPct(newPct, 2)}</td>
+                      <td className="px-3 py-2" />
                     </tr>
                   );
                 })()}
@@ -285,8 +327,16 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
                   const newNAV = positionNewNAV(p);
                   const newPct = newTotal > 0 ? (newNAV / newTotal) * 100 : 0;
                   const sec = sectorOf(p.sectorId);
+                  const beingDragged = dragId === p.id;
                   return (
-                    <tr key={p.id} style={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: p.txn ? ACCENT + '0a' : 'transparent' }}>
+                    <tr key={p.id}
+                      onDragOver={onDragOver}
+                      onDrop={onDrop(p.id)}
+                      style={{
+                        borderBottom: `1px solid ${BORDER}`,
+                        backgroundColor: p.txn ? ACCENT + '0a' : 'transparent',
+                        opacity: beingDragged ? 0.4 : 1,
+                      }}>
                       <td className="px-3 py-2">
                         {p._linked ? (
                           <>
@@ -355,12 +405,34 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums font-medium" style={{ color: ACCENT }}>{fmtCurrency(newNAV)}</td>
                       <td className="px-3 py-2 text-right tabular-nums" style={{ color: ACCENT }}>{fmtPct(newPct, 2)}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center justify-end gap-1">
+                          <span
+                            draggable
+                            onDragStart={onDragStart(p.id)}
+                            onDragEnd={onDragEnd}
+                            className="cursor-grab active:cursor-grabbing p-0.5 rounded"
+                            style={{ color: TEXT_MUTE }}
+                            title="Drag to reorder"
+                          >
+                            <GripVertical size={12} />
+                          </span>
+                          <button
+                            onClick={() => deletePosition(p.id)}
+                            className="p-0.5 rounded"
+                            style={{ color: TEXT_DIM }}
+                            title="Delete row"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
                 {nonCash.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-xs" style={{ color: TEXT_DIM }}>
+                    <td colSpan={10} className="px-4 py-8 text-center text-xs" style={{ color: TEXT_DIM }}>
                       No positions yet. Click "Add asset" to start.
                     </td>
                   </tr>
