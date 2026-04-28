@@ -1,0 +1,161 @@
+import { describe, it, expect } from 'vitest';
+
+import {
+  txnDollarAmount,
+  txnDelta,
+  positionPriorNAV,
+  positionNewNAV,
+  totalPriorNAV,
+  sumPositionNewNAV,
+  residualCash,
+  applyTxns,
+} from './snapshotDraft.js';
+
+describe('txnDollarAmount', () => {
+  it('returns 0 for null/undefined txn', () => {
+    expect(txnDollarAmount(null, 1000)).toBe(0);
+    expect(txnDollarAmount(undefined, 1000)).toBe(0);
+  });
+
+  it('returns 0 for empty / null amount', () => {
+    expect(txnDollarAmount({ type: 'B', amount: '', mode: '$' }, 1000)).toBe(0);
+    expect(txnDollarAmount({ type: 'B', amount: null, mode: '$' }, 1000)).toBe(0);
+  });
+
+  it('returns the amount as dollars when mode is $', () => {
+    expect(txnDollarAmount({ type: 'B', amount: 250, mode: '$' }, 1000)).toBe(250);
+  });
+
+  it('multiplies prior NAV by percentage when mode is %', () => {
+    expect(txnDollarAmount({ type: 'S', amount: 50, mode: '%' }, 1000)).toBe(500);
+  });
+
+  it('returns 0 when amount is non-numeric', () => {
+    expect(txnDollarAmount({ type: 'B', amount: 'abc', mode: '$' }, 1000)).toBe(0);
+  });
+});
+
+describe('txnDelta', () => {
+  it('B (buy) returns a positive dollar delta', () => {
+    expect(txnDelta({ type: 'B', amount: 100, mode: '$' }, 1000)).toBe(100);
+  });
+
+  it('C (cashflow allocation) returns a positive dollar delta', () => {
+    expect(txnDelta({ type: 'C', amount: 100, mode: '$' }, 1000)).toBe(100);
+  });
+
+  it('S (sell) returns a negative dollar delta', () => {
+    expect(txnDelta({ type: 'S', amount: 100, mode: '$' }, 1000)).toBe(-100);
+  });
+
+  it('respects % mode', () => {
+    expect(txnDelta({ type: 'B', amount: 25, mode: '%' }, 1000)).toBe(250);
+    expect(txnDelta({ type: 'S', amount: 50, mode: '%' }, 1000)).toBe(-500);
+  });
+
+  it('returns 0 for null/empty txn', () => {
+    expect(txnDelta(null, 1000)).toBe(0);
+    expect(txnDelta({ type: 'B', amount: '', mode: '$' }, 1000)).toBe(0);
+  });
+});
+
+describe('positionPriorNAV', () => {
+  it('reads soiMarketValue', () => {
+    expect(positionPriorNAV({ soiMarketValue: 1234 })).toBe(1234);
+  });
+
+  it('returns 0 when soiMarketValue is missing', () => {
+    expect(positionPriorNAV({})).toBe(0);
+    expect(positionPriorNAV({ soiMarketValue: null })).toBe(0);
+  });
+});
+
+describe('positionNewNAV', () => {
+  it('returns prior + signed delta', () => {
+    expect(positionNewNAV({ soiMarketValue: 1000, txn: { type: 'B', amount: 250, mode: '$' } })).toBe(1250);
+    expect(positionNewNAV({ soiMarketValue: 1000, txn: { type: 'S', amount: 250, mode: '$' } })).toBe(750);
+  });
+
+  it('returns prior unchanged when no txn', () => {
+    expect(positionNewNAV({ soiMarketValue: 1000 })).toBe(1000);
+  });
+});
+
+describe('totalPriorNAV', () => {
+  it('sums soiMarketValue across positions', () => {
+    expect(totalPriorNAV([{ soiMarketValue: 100 }, { soiMarketValue: 250 }])).toBe(350);
+  });
+
+  it('returns 0 for empty / null input', () => {
+    expect(totalPriorNAV([])).toBe(0);
+    expect(totalPriorNAV(null)).toBe(0);
+  });
+});
+
+describe('sumPositionNewNAV', () => {
+  it('sums NAV after applying each position txn', () => {
+    const positions = [
+      { soiMarketValue: 1000, txn: { type: 'B', amount: 100, mode: '$' } },
+      { soiMarketValue: 500, txn: { type: 'S', amount: 50, mode: '$' } },
+    ];
+    expect(sumPositionNewNAV(positions)).toBe(1550);
+  });
+});
+
+describe('residualCash', () => {
+  it('starts from cashflow and applies B/S/C deltas', () => {
+    // 100 in - 50 buy + 25 sell - 10 cashflow allocation = 65
+    const positions = [
+      { soiMarketValue: 0, txn: { type: 'B', amount: 50, mode: '$' } },
+      { soiMarketValue: 0, txn: { type: 'S', amount: 25, mode: '$' } },
+      { soiMarketValue: 0, txn: { type: 'C', amount: 10, mode: '$' } },
+    ];
+    expect(residualCash(positions, 100)).toBe(65);
+  });
+
+  it('returns the cashflow when no positions have txns', () => {
+    expect(residualCash([{ soiMarketValue: 100 }], 50)).toBe(50);
+  });
+
+  it('returns 0 when nothing happened', () => {
+    expect(residualCash([], 0)).toBe(0);
+  });
+
+  it('can be negative (capital called from cash bucket)', () => {
+    const positions = [{ soiMarketValue: 0, txn: { type: 'B', amount: 200, mode: '$' } }];
+    expect(residualCash(positions, 0)).toBe(-200);
+  });
+
+  it('can be positive (net inflow)', () => {
+    const positions = [{ soiMarketValue: 1000, txn: { type: 'S', amount: 100, mode: '%' } }];
+    expect(residualCash(positions, 0)).toBe(1000);
+  });
+
+  it('returns 0 for empty positions and zero cashflow', () => {
+    expect(residualCash(null, 0)).toBe(0);
+  });
+});
+
+describe('applyTxns', () => {
+  it('strips the txn field and updates soiMarketValue to the post-txn value', () => {
+    const positions = [
+      { id: 'p1', soiMarketValue: 1000, txn: { type: 'B', amount: 100, mode: '$' } },
+      { id: 'p2', soiMarketValue: 500, txn: null },
+    ];
+    const out = applyTxns(positions);
+    expect(out[0]).toEqual({ id: 'p1', soiMarketValue: 1100 });
+    expect(out[1]).toEqual({ id: 'p2', soiMarketValue: 500 });
+    // txn field gone on every output position
+    out.forEach((p) => expect(p.txn).toBeUndefined());
+  });
+
+  it('preserves other position fields', () => {
+    const out = applyTxns([{ id: 'p1', positionName: 'BTC', ticker: 'BTC', soiMarketValue: 100, txn: null, costBasis: 50 }]);
+    expect(out[0]).toMatchObject({ id: 'p1', positionName: 'BTC', ticker: 'BTC', costBasis: 50 });
+  });
+
+  it('returns [] for empty / null input', () => {
+    expect(applyTxns([])).toEqual([]);
+    expect(applyTxns(null)).toEqual([]);
+  });
+});
