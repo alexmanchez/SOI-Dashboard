@@ -3,11 +3,12 @@ import _ from 'lodash';
 // CoinGecko live + historical prices + coin detail.
 export const CG_BASE = 'https://api.coingecko.com/api/v3';
 
-/* Embedded CoinGecko Demo API key. Prefer VITE_COINGECKO_API_KEY via env
-   at build time; the literal below is the demo fallback. */
+/* CoinGecko Demo API key — supplied via VITE_COINGECKO_API_KEY in .env.local
+   (or the host's environment). Empty string falls back to a soft warning at
+   call-time rather than silently using a hard-coded demo key. */
 export const EMBEDDED_CG_API_KEY =
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_COINGECKO_API_KEY) ||
-  'CG-7PkUvXxmyBFtFXTB7HJSkX5e';
+  '';
 
 /* Settings-drawer override wins (useful for test keys without a rebuild). */
 export const resolveApiKey = (storeKey) => {

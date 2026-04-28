@@ -55,38 +55,45 @@ folders). Top-to-bottom it's:
 6. Settings drawer, Import wizard, Position editor modals.
 7. The top-level `SOIDashboard` component that ties everything together.
 
-## Run locally
+## Local development
 
 ```bash
 npm install
-cp .env.example .env      # optional: override keys
+cp .env.example .env.local   # paste your API keys
 npm run dev
 ```
 
-Open `http://localhost:5173`. Vite hot-reloads on every save.
+Open `http://localhost:5173`. Vite hot-reloads on every save. `.env.local`
+is git-ignored — keep your keys out of source control.
+
+If you skip the `.env.local` step the app still runs, but anything that
+needs a live API call will display a soft "no API key configured" message
+and the affected feature stays inert. CoinGecko prices are gated by the
+"Live: ON" toggle in the header anyway, so a missing key is harmless until
+you flip it on.
 
 ## Deploying
 
 Pushing to `main` on GitHub triggers a Vercel rebuild at
-`https://soi-dashboard.vercel.app`. No other deploy step.
+`https://soi-dashboard.vercel.app`. No other deploy step. Set the
+`VITE_*_API_KEY` variables under Vercel → Project → Settings →
+Environment Variables so the deploy ships with keys configured.
 
 ## API keys
 
-All three keys ship embedded in the client bundle:
+Three integrations need keys; all are read from `import.meta.env.VITE_*`
+at build time and inlined into the client bundle:
 
-- **CoinGecko** (`EMBEDDED_CG_API_KEY`) — live + historical prices.
-- **CryptoRank** (`EMBEDDED_CR_API_KEY`) — backup source for token images
-  and market data.
-- **CoinMarketCap** (`EMBEDDED_CMC_API_KEY`) — primary source for token
-  logos (including animated GIFs for top tokens).
+- **CoinGecko** (`VITE_COINGECKO_API_KEY`) — live + historical prices.
+- **CoinMarketCap** (`VITE_COINMARKETCAP_API_KEY`) — primary source for
+  token logos (including animated GIFs for top tokens).
+- **CryptoRank** (`VITE_CRYPTORANK_API_KEY`) — backup token-image source
+  and manager funding-round data.
 
 **Heads up:** anything bundled is visible to anyone who views the
 deployed page's source. These are demo-tier keys on an internal tool —
 fine for now. For a production public deploy, proxy the calls through a
 small backend.
-
-Override any of them by setting the matching `VITE_*` env var in `.env`
-or in Vercel's environment variables.
 
 ## Features
 
