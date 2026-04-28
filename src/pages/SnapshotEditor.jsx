@@ -395,7 +395,12 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
                       <td className="px-3 py-2 text-right tabular-nums" style={{ color: TEXT_DIM }}>{fmtCurrency(priorNAV)}</td>
                       <td className="px-3 py-2 text-right tabular-nums" style={{ color: TEXT_DIM }}>{fmtPct(priorPct, 2)}</td>
                       <td className="px-3 py-2">
-                        <ChangeEditor txn={p.txn} priorNAV={priorNAV} onChange={(txn) => setTxn(p.id, txn)} />
+                        <ChangeEditor
+                          txn={p.txn}
+                          priorNAV={priorNAV}
+                          soiPrice={p.soiPrice}
+                          onChange={(txn) => setTxn(p.id, txn)}
+                        />
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums" style={{ color: txnAmt > 0 ? GREEN : (txnAmt < 0 ? RED : TEXT_DIM) }}>
                         {txnAmt === 0 ? '—' : (txnAmt > 0 ? '+' : '') + fmtCurrency(txnAmt)}
@@ -481,14 +486,18 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
   );
 }
 
-/* Inline B/S/C tag selector + amount input + $/% mode toggle. Commits on every
-   keystroke. `mode` controls whether `amount` is read as dollars or as a
-   percentage of the position's prior NAV (priorNAV used only for the small
-   live preview underneath the input). */
-function ChangeEditor({ txn, priorNAV, onChange }) {
+/* Inline B/S/C tag selector + amount input + $/%/Qty mode toggle. Commits
+   on every keystroke. `mode` controls how `amount` is interpreted:
+     '$'   — literal dollar amount.
+     '%'   — percentage of priorNAV.
+     'Qty' — token quantity × soiPrice (disabled when soiPrice is missing).
+   priorNAV / soiPrice feed the small live preview to the right of the
+   input ("≈ $X,XXX"). */
+function ChangeEditor({ txn, priorNAV, soiPrice, onChange }) {
   const tag = txn?.type || '';
   const amount = txn?.amount ?? '';
   const mode = txn?.mode || '$';
+  const qtyEnabled = Number(soiPrice) > 0;
 
   const tagColor = (t) => (t === 'S' ? RED : t === 'B' ? GREEN : ACCENT);
 
@@ -516,12 +525,35 @@ function ChangeEditor({ txn, priorNAV, onChange }) {
 
   const setMode = (nextMode) => commit(tag, amount, nextMode);
 
-  // Preview the dollar value when in % mode so the user can see what it works
-  // out to. e.g., "S 50% → $1.5M of $3.0M".
+  // Cycle $ → % → Qty → $. Skip Qty when there's no snapshot price for this
+  // position (the dollar value would be 0). The Qty button has its own
+  // tooltip explaining why in that case.
+  const cycleMode = () => {
+    if (mode === '$') return setMode('%');
+    if (mode === '%') return setMode(qtyEnabled ? 'Qty' : '$');
+    return setMode('$'); // from Qty
+  };
+
+  // Preview the dollar value for non-$ modes so the user can see what their
+  // input works out to. e.g., "S 50% → $1.5M" or "B 10 → ≈ $42,000".
   const dollarPreview = (() => {
-    if (mode !== '%' || amount === '' || !priorNAV) return null;
-    const dollars = (priorNAV * (Number(amount) || 0)) / 100;
-    return dollars;
+    if (amount === '') return null;
+    if (mode === '%' && priorNAV) {
+      return (priorNAV * (Number(amount) || 0)) / 100;
+    }
+    if (mode === 'Qty' && qtyEnabled) {
+      return (Number(amount) || 0) * Number(soiPrice);
+    }
+    return null;
+  })();
+
+  const modeLabel = mode === '$' ? '$' : mode === '%' ? '%' : 'Qty';
+  const modeTooltip = (() => {
+    if (mode === '$') return 'Dollar amount — click to switch to % of prior NAV';
+    if (mode === '%') return qtyEnabled
+      ? 'Percentage of prior NAV — click to switch to token quantity'
+      : 'Percentage of prior NAV — click to switch back to dollars (Qty disabled, no snapshot price)';
+    return 'Token quantity × snapshot price — click to switch back to dollars';
   })();
 
   return (
@@ -547,25 +579,26 @@ function ChangeEditor({ txn, priorNAV, onChange }) {
       <div className="flex items-center" style={{ border: `1px solid ${BORDER}`, borderRadius: 4, overflow: 'hidden' }}>
         <input
           type="number"
-          placeholder={mode === '%' ? 'pct' : 'amount'}
+          placeholder={mode === '%' ? 'pct' : mode === 'Qty' ? 'qty' : 'amount'}
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           className="text-sm px-1.5 py-0.5 w-20 tabular-nums outline-none"
           style={{ backgroundColor: PANEL_2, border: 'none', color: TEXT }}
         />
         <button
-          onClick={() => setMode(mode === '$' ? '%' : '$')}
-          title={mode === '$' ? 'Switch to percentage of position' : 'Switch to dollar amount'}
+          onClick={cycleMode}
+          title={modeTooltip}
           className="text-[10px] font-semibold px-1.5"
           style={{
             backgroundColor: PANEL,
-            color: mode === '%' ? ACCENT : TEXT_DIM,
+            color: mode === '$' ? TEXT_DIM : ACCENT,
             borderLeft: `1px solid ${BORDER}`,
             cursor: 'pointer',
             height: '100%',
             minHeight: 22,
+            minWidth: mode === 'Qty' ? 28 : 18,
           }}
-        >{mode === '$' ? '$' : '%'}</button>
+        >{modeLabel}</button>
       </div>
       {dollarPreview != null && (
         <span className="text-[10px] tabular-nums" style={{ color: TEXT_MUTE }}>
