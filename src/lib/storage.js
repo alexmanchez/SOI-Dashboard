@@ -73,6 +73,33 @@ export const loadStore = () => {
     const hasV5Sectors =
       Array.isArray(parsed.sectors) && parsed.sectors.some((s) => s && s.id === 'base-layer');
     if (!hasV5Sectors) parsed.sectors = DEFAULT_SECTORS;
+    // Append the 'cash' sector if a v5 store was created before it existed.
+    if (!parsed.sectors.some((s) => s && s.id === 'cash')) {
+      const cashFromDefault = DEFAULT_SECTORS.find((s) => s.id === 'cash');
+      if (cashFromDefault) parsed.sectors = [...parsed.sectors, cashFromDefault];
+    }
+    // Ensure each snapshot has exactly one cash bucket position. Idempotent —
+    // skip when one already exists. Existing snapshots created before Task D
+    // get a $0 cash bucket appended at the head of their positions array.
+    for (const soi of parsed.soIs) {
+      for (const snap of snapshotsOf(soi)) {
+        if (!Array.isArray(snap.positions)) snap.positions = [];
+        if (snap.positions.some((p) => p?.isCashBucket === true)) continue;
+        snap.positions = [
+          {
+            id: `cash_${snap.id || soi.id}`,
+            isCashBucket: true,
+            positionName: 'Cash',
+            ticker: 'USD',
+            sectorId: 'cash',
+            soiMarketValue: 0,
+            quantity: 0,
+            assetType: 'Cash',
+          },
+          ...snap.positions,
+        ];
+      }
+    }
     return {
       ...emptyStore(),
       ...parsed,

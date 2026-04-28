@@ -13,6 +13,7 @@ export const DEFAULT_SECTORS = [
   { id: 'stablecoins',      label: 'Stablecoins & Cash',      color: '#A7A9AC', desc: 'USDC, USDT, DAI, USDe' },
   { id: 'rwa-credit',       label: 'RWA & Credit',            color: '#D4A64F', desc: 'Tokenized RWAs, on-chain debt' },
   { id: 'staking',          label: 'Staking & Restaking',     color: '#10B981', desc: 'Liquid staking, restaking, validators' },
+  { id: 'cash',             label: 'Cash',                    color: '#D4A64F', desc: 'USD cash bucket held by the fund' },
 ];
 
 export const UNCLASSIFIED = { id: 'unclassified', label: 'Unclassified', color: '#6B7280' };
