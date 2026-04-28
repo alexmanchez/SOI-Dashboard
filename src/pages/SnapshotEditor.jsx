@@ -14,13 +14,14 @@ import {
 } from '../lib/snapshotDraft';
 
 import { Panel } from '../components/ui';
+import { TokenSearch } from '../components/TokenSearch';
 
 /* Roll-forward snapshot editor — Cambridge-style WHAT-IF table.
    Two-pane layout: prior snapshot on the left (gray), new snapshot on the right
    (accent-tinted). User edits the CHANGE column with B/S/C tags + amounts.
    Computed columns: TXN, TXN%, new NAV, new ALLOC%. On save, txns collapse into
    the position's soiMarketValue and a finalized snapshot is appended. */
-export function SnapshotEditor({ store, soiId, updateStore, onClose }) {
+export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
   const soi = store.soIs.find((s) => s.id === soiId);
   const manager = store.managers.find((m) => m.id === soi?.managerId);
   const baseSnap = soi ? latestSnapshot(soi) : null;
@@ -29,7 +30,10 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose }) {
   const [description, setDescription] = useState('');
   const [draft, setDraft] = useState(() => {
     if (!soi || !baseSnap) return [];
-    return (baseSnap.positions || []).map((p) => ({ ...p, txn: null }));
+    // Existing positions are already linked — they have names/tickers from the
+    // prior snapshot. New ones (added below) start with _linked: false so the
+    // search dropdown shows.
+    return (baseSnap.positions || []).map((p) => ({ ...p, txn: null, _linked: true }));
   });
   const [cashflow, setCashflow] = useState(0);
 
@@ -87,7 +91,10 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose }) {
 
   const handleSave = () => {
     if (!canSave) return;
-    const cleaned = applyTxns(draft);
+    // Strip the transient _linked flag before saving — it's a UI-only marker
+    // for whether the row has been resolved to a token.
+    const stripped = draft.map(({ _linked: _l, ...rest }) => rest);
+    const cleaned = applyTxns(stripped);
     const newSnap = {
       id: `s_${Math.random().toString(36).slice(2, 10)}`,
       asOfDate,
@@ -206,14 +213,46 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose }) {
                   return (
                     <tr key={p.id} style={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: p.txn ? ACCENT + '0a' : 'transparent' }}>
                       <td className="px-3 py-2">
-                        <input
-                          type="text"
-                          value={p.positionName || ''}
-                          onChange={(e) => updatePositionField(p.id, 'positionName', e.target.value)}
-                          placeholder="Asset name"
-                          className="bg-transparent border-none outline-none w-full text-sm"
-                          style={{ color: TEXT }}
-                        />
+                        {p._linked ? (
+                          <>
+                            <input
+                              type="text"
+                              value={p.positionName || ''}
+                              onChange={(e) => updatePositionField(p.id, 'positionName', e.target.value)}
+                              className="bg-transparent border-none outline-none w-full text-sm"
+                              style={{ color: TEXT }}
+                            />
+                            <div className="text-[10px] flex items-center gap-1" style={{ color: TEXT_DIM }}>
+                              {p.ticker || 'custom'}
+                              {p.cgTokenId && (
+                                <span title="Linked to CoinGecko — live prices available"
+                                  style={{ color: ACCENT, fontSize: 8 }}>●</span>
+                              )}
+                              <button
+                                onClick={() => setDraft((d) => d.map((x) => x.id === p.id ? { ...x, _linked: false } : x))}
+                                className="text-[9px] underline"
+                                style={{ color: TEXT_MUTE }}
+                                title="Re-search this asset"
+                              >change</button>
+                            </div>
+                          </>
+                        ) : (
+                          <TokenSearch
+                            value={p.positionName || ''}
+                            onChange={(q) => updatePositionField(p.id, 'positionName', q)}
+                            onSelect={(coin) => {
+                              setDraft((d) => d.map((x) => x.id === p.id ? {
+                                ...x,
+                                positionName: coin.name,
+                                ticker: coin.symbol || x.ticker || '',
+                                cgTokenId: coin.id || x.cgTokenId || null,
+                                _linked: true,
+                              } : x));
+                            }}
+                            apiKey={apiKey}
+                            autoFocus={!p.positionName}
+                          />
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         <select

@@ -595,6 +595,7 @@ export default function App() {
           store={store}
           soiId={snapshotEditorSoi}
           updateStore={updateStore}
+          apiKey={effectiveApiKey}
           onClose={() => setSnapshotEditorSoi(null)}
         />
       </div>

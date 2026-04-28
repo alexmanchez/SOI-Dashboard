@@ -100,3 +100,80 @@ export const fetchHistory = async (tokenIds, days, apiKey, onProgress) => {
   }
   return { history: out, error: null };
 };
+
+// === Coin list (token search) ============================================ //
+//
+// /coins/list returns ~15k coins as { id, symbol, name }. Cached 24h in
+// localStorage so the snapshot editor's autocomplete is instant on repeat
+// opens. ~1.5 MB serialized — fits comfortably in localStorage's 5–10 MB.
+
+const COINS_LIST_CACHE_KEY = 'catena.cgCoinsList.v1';
+const COINS_LIST_TTL_MS = 24 * 60 * 60 * 1000;
+
+let inMemCoinsList = null;
+let inMemCoinsListAt = 0;
+
+const loadCoinsListCache = () => {
+  try {
+    const raw = localStorage.getItem(COINS_LIST_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > COINS_LIST_TTL_MS) return null;
+    return parsed.data || null;
+  } catch { return null; }
+};
+
+const saveCoinsListCache = (data) => {
+  try {
+    localStorage.setItem(COINS_LIST_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data }));
+  } catch { /* quota / disabled */ }
+};
+
+export const fetchAllCoins = async (apiKey) => {
+  const now = Date.now();
+  if (inMemCoinsList && now - inMemCoinsListAt < COINS_LIST_TTL_MS) {
+    return { data: inMemCoinsList, error: null };
+  }
+  const cached = loadCoinsListCache();
+  if (cached) {
+    inMemCoinsList = cached;
+    inMemCoinsListAt = now;
+    return { data: cached, error: null };
+  }
+  try {
+    const res = await fetch(withKey(`${CG_BASE}/coins/list`, apiKey));
+    if (!res.ok) return { data: null, error: `CoinGecko ${res.status}` };
+    const all = await res.json();
+    inMemCoinsList = all;
+    inMemCoinsListAt = now;
+    saveCoinsListCache(all);
+    return { data: all, error: null };
+  } catch (e) {
+    return { data: null, error: e?.message || 'Network error' };
+  }
+};
+
+/* Lightweight relevance ranking — exact symbol, then symbol prefix, then name
+   prefix, then substring fallback. Capped at `limit` results. Runs through the
+   ~15k list in <5ms in practice; no fuzzy lib needed. */
+export const searchCoins = (coins, query, limit = 8) => {
+  if (!Array.isArray(coins) || !query) return [];
+  const q = String(query).toLowerCase().trim();
+  if (!q) return [];
+  const exact = [];
+  const symbolPrefix = [];
+  const namePrefix = [];
+  const contains = [];
+  for (const c of coins) {
+    const sym = (c.symbol || '').toLowerCase();
+    const name = (c.name || '').toLowerCase();
+    const id = (c.id || '').toLowerCase();
+    if (sym === q) exact.push(c);
+    else if (sym.startsWith(q)) symbolPrefix.push(c);
+    else if (name.startsWith(q)) namePrefix.push(c);
+    else if (sym.includes(q) || name.includes(q) || id.includes(q)) contains.push(c);
+    if (exact.length + symbolPrefix.length + namePrefix.length + contains.length >= limit * 4) break;
+  }
+  return [...exact, ...symbolPrefix, ...namePrefix, ...contains].slice(0, limit);
+};
+
