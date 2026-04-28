@@ -38,8 +38,10 @@ export function ManagerRoundsPage({ manager, updateStore }) {
   };
 
   useEffect(() => {
+    // Async fetch into local state — the rule's recommended "callback" form
+    // is satisfied by the awaited fetchManagerRounds call inside load().
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load(slug);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   const persistSlug = () => {
