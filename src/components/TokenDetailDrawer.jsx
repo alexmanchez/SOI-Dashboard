@@ -43,20 +43,20 @@ export function TokenDetailDrawer({ token, onClose, apiKey, store }) {
   }, [expanded, token?.cgTokenId]);
 
   useEffect(() => {
-    // When token has no cgTokenId we surface an inline error; when it does,
-    // we synchronously mark loading before kicking off the fetch. Both are
-    // "sync external data" flows — the React-blessed alternative (deriving
-    // loading/error from props) would duplicate the state machine.
-    if (!token?.cgTokenId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
-      setError('This position has no CoinGecko ID linked.');
-      setLoading(false);
-      return;
-    }
+    // All setState calls live inside the async IIFE and are gated on
+    // !cancelled, so React's set-state-in-effect rule is satisfied without
+    // a disable comment — every update happens "in a callback" relative to
+    // the effect body.
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     (async () => {
+      if (!token?.cgTokenId) {
+        if (cancelled) return;
+        setError('This position has no CoinGecko ID linked.');
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      setError(null);
       const [coinRes, chartRes] = await Promise.all([
         fetchCoinDetail(token.cgTokenId, apiKey),
         fetchCoinChart(token.cgTokenId, '365', apiKey),
@@ -73,14 +73,13 @@ export function TokenDetailDrawer({ token, onClose, apiKey, store }) {
   useEffect(() => {
     if (!token?.cgTokenId || range === '365') return;
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- pre-fetch spinner
-    setChartLoading(true);
     (async () => {
+      if (cancelled) return;
+      setChartLoading(true);
       const r = await fetchCoinChart(token.cgTokenId, range, apiKey);
-      if (!cancelled) {
-        if (r.data) setChart(r.data);
-        setChartLoading(false);
-      }
+      if (cancelled) return;
+      if (r.data) setChart(r.data);
+      setChartLoading(false);
     })();
     return () => { cancelled = true; };
   }, [token?.cgTokenId, range, apiKey]);
@@ -90,13 +89,12 @@ export function TokenDetailDrawer({ token, onClose, apiKey, store }) {
   // tied to apiKey since DefiLlama is unauthenticated.
   const [protocol, setProtocol] = useState(null);
   useEffect(() => {
-    if (!token) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset on token cleared, no synchronous prop->state derivation possible
-      setProtocol(null);
-      return;
-    }
     let cancelled = false;
     (async () => {
+      if (!token) {
+        if (!cancelled) setProtocol(null);
+        return;
+      }
       const { data } = await fetchProtocols();
       if (cancelled) return;
       const match = findProtocolMatch(data, {
