@@ -4,7 +4,6 @@ import { ExternalLink, RefreshCw } from 'lucide-react';
 import { PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, GREEN } from '../lib/theme';
 import { fmtCurrency } from '../lib/format';
 import { fetchManagerRounds, slugifyManagerName } from '../lib/api/cryptorank';
-
 import { Panel } from '../components/ui';
 
 /* CryptoRank-powered "Recent Rounds" view for a manager. Looks up rounds by

@@ -9,7 +9,6 @@ import {
   PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT,
 } from '../lib/theme';
 import { fundLabel } from '../lib/format';
-
 import { MenuItem } from './ui';
 
 export function PortfolioSelector({ store, selection, onChange }) {

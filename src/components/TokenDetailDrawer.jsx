@@ -16,7 +16,6 @@ import { latestSnapshot } from '../lib/snapshots';
 import { fetchCoinDetail, fetchCoinChart } from '../lib/api/coingecko';
 import { fetchProtocols, findProtocolMatch } from '../lib/api/defillama';
 import { DETAIL_RANGES } from '../lib/ranges';
-
 import { Pill } from './ui';
 import { TokenIcon } from './TokenIcon';
 

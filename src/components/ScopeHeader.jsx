@@ -2,7 +2,6 @@ import { AlertCircle, Upload } from 'lucide-react';
 
 import { BG, TEXT_DIM, TEXT_MUTE, ACCENT, RED } from '../lib/theme';
 import { fmtCurrency } from '../lib/format';
-
 import { Panel, EditableText } from './ui';
 
 /**

@@ -11,7 +11,6 @@ import {
 import { getSectors } from '../lib/sectors';
 import { liquidityOverrideOf } from '../lib/snapshots';
 import { parseNum } from '../lib/parsing';
-
 import {
   Field, TextInput, Select, Modal,
 } from '../components/ui';

@@ -3,7 +3,6 @@ import { Home, Layers, Briefcase, Users, ChevronRight } from 'lucide-react';
 import { BORDER, PANEL_2, TEXT, TEXT_MUTE, ACCENT_2 } from '../lib/theme';
 import { fmtCurrency, fundLabel } from '../lib/format';
 import { latestSnapshot } from '../lib/snapshots';
-
 import { NavButton } from './ui';
 import { CreateMenu } from './CreateMenu';
 

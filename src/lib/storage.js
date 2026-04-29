@@ -1,4 +1,5 @@
 import _ from 'lodash';
+
 import { DEFAULT_SECTORS } from './sectors';
 import { snapshotsOf, latestSnapshot } from './snapshots';
 

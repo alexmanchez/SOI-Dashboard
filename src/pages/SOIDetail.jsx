@@ -18,7 +18,6 @@ import {
 import {
   snapshotsOf, latestSnapshot, sortedSnapshots, isLiquid, liquidityOverrideOf,
 } from '../lib/snapshots';
-
 import {
   Panel, ChangeCell, KPI, NumField, Stat,
 } from '../components/ui';

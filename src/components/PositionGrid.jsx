@@ -10,7 +10,6 @@ import { fmtCurrency, fmtPct, fmtMoic } from '../lib/format';
 import { getSectors, sectorOf } from '../lib/sectors';
 import { parseNum } from '../lib/parsing';
 import { isCashBucket } from '../lib/snapshotDraft';
-
 import { Panel, SortHead } from './ui';
 
 const VALUATION_METHOD_OPTIONS = [

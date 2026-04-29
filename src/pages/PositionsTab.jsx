@@ -16,7 +16,6 @@ import { getSectors, sectorOf } from '../lib/sectors';
 import {
   snapshotsOf,
 } from '../lib/snapshots';
-
 import {
   Panel, SortHead, ChangeCell,
 } from '../components/ui';

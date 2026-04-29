@@ -2,7 +2,6 @@ import { Search, Users, Briefcase } from 'lucide-react';
 
 import { PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT_2 } from '../lib/theme';
 import { fundLabel } from '../lib/format';
-
 import { TokenIcon } from './TokenIcon';
 
 /**
