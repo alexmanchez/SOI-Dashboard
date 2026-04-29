@@ -92,6 +92,7 @@ export function TokenDetailDrawer({ token, onClose, apiKey, store }) {
   const [protocol, setProtocol] = useState(null);
   useEffect(() => {
     if (!token) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset on token cleared, no synchronous prop->state derivation possible
       setProtocol(null);
       return;
     }

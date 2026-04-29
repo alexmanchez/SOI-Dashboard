@@ -1,10 +1,17 @@
 // CryptoRank market-data endpoints (demo tariff).
+// Supplied via VITE_CRYPTORANK_API_KEY in .env.local. Empty string degrades
+// gracefully — cryptorankFetch returns a "no API key configured" error and
+// the dependent features (token-image fallbacks, manager rounds) silently
+// skip until a key is configured.
 export const CR_BASE = 'https://api.cryptorank.io/v2';
 export const EMBEDDED_CR_API_KEY =
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_CRYPTORANK_API_KEY) ||
-  '82065ff0e0427de4c4a2d7cfb57e8e83f1ee76daf7d62557dce888814c01';
+  '';
 
 export const cryptorankFetch = async (path) => {
+  if (!EMBEDDED_CR_API_KEY) {
+    return { data: null, error: 'No CryptoRank API key configured (VITE_CRYPTORANK_API_KEY).' };
+  }
   try {
     const res = await fetch(`${CR_BASE}${path}`, {
       headers: { 'X-Api-Key': EMBEDDED_CR_API_KEY },

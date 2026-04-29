@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Layers, Plus, Trash2 } from 'lucide-react';
 import _ from 'lodash';
 
 import {
@@ -9,6 +9,7 @@ import {
 import { fmtCurrency, fmtPct, fmtMoic } from '../lib/format';
 import { getSectors, sectorOf } from '../lib/sectors';
 import { parseNum } from '../lib/parsing';
+import { isCashBucket } from '../lib/snapshotDraft';
 
 import { Panel, SortHead } from './ui';
 
@@ -88,9 +89,13 @@ export function PositionGrid({
   const [editing, setEditing] = useState(null); // { rowId, colId }
   const [draft, setDraft] = useState('');
   const [invalid, setInvalid] = useState(false);
+  const [groupBySector, setGroupBySector] = useState(false);
   const inputRef = useRef(null);
   const gridRef = useRef(null);
 
+  // Sort positions by the user's chosen column. The "sorted" list is the
+  // basic sort; when grouping is on the navigable list (`navList`) regroups
+  // these so Tab order matches visual order.
   const sorted = useMemo(() => {
     const col = COLUMNS.find((c) => c.id === sortBy);
     const keyFn = col && col.get ? (p) => col.get(p, null, totalNAV) : (p) => p[sortBy];
@@ -100,6 +105,35 @@ export function PositionGrid({
       return v;
     }], [sortDir]);
   }, [positions, sortBy, sortDir, totalNAV]);
+
+  // Group rows by sector, sort sectors by aggregate value desc, cash bucket
+  // pinned at the head. Used for both rendering (with section headers) and
+  // navigation (flat order). Each group includes a `total` for the summary.
+  const grouped = useMemo(() => {
+    if (!groupBySector) return null;
+    const cash = sorted.filter(isCashBucket);
+    const nonCash = sorted.filter((p) => !isCashBucket(p));
+    const byId = {};
+    for (const r of nonCash) {
+      const id = r.sectorId || 'unclassified';
+      if (!byId[id]) byId[id] = { id, rows: [], total: 0 };
+      byId[id].rows.push(r);
+      byId[id].total += r.soiMarketValue || 0;
+    }
+    const groups = Object.values(byId)
+      .map((g) => ({ ...g, sectorObj: sectorOf(g.id) }))
+      .sort((a, b) => b.total - a.total);
+    return { cash, groups };
+  }, [sorted, groupBySector]);
+
+  // Flat navigation list — keyboard Tab order. When grouping is on, this
+  // reflects the visual top-to-bottom order (cash first, then each group's
+  // rows in sequence). When off, it's just the sorted list as-is. Group
+  // headers are not in this list, so navigation naturally skips them.
+  const navList = useMemo(() => {
+    if (!groupBySector || !grouped) return sorted;
+    return [...grouped.cash, ...grouped.groups.flatMap((g) => g.rows)];
+  }, [sorted, groupBySector, grouped]);
 
   const editableCols = COLUMNS.filter((c) => c.editable);
 
@@ -155,7 +189,7 @@ export function PositionGrid({
   const beginEdit = (rowId, colId) => {
     const col = COLUMNS.find((c) => c.id === colId);
     if (!col || !col.editable) return;
-    const pos = sorted.find((p) => p.id === rowId);
+    const pos = navList.find((p) => p.id === rowId);
     if (!pos) return;
     const rawVal = col.get(pos);
     setEditing({ rowId, colId });
@@ -169,7 +203,11 @@ export function PositionGrid({
     if (shouldCommit && editing) {
       if (!commit()) return;
     }
-    const rowIdx = sorted.findIndex((p) => p.id === rowId);
+    // navList drives Tab order so that, when grouping is on, the user moves
+    // from the last cell of group A's last row directly into the first cell
+    // of group B's first row — group headers aren't in this list, so they're
+    // naturally skipped.
+    const rowIdx = navList.findIndex((p) => p.id === rowId);
     const visibleCols = editableCols;
     const colIdx = visibleCols.findIndex((c) => c.id === colId);
     let nextRow = rowIdx + dy;
@@ -183,9 +221,9 @@ export function PositionGrid({
       nextCol += visibleCols.length;
       nextRow -= 1;
     }
-    if (nextRow < 0 || nextRow >= sorted.length) return;
+    if (nextRow < 0 || nextRow >= navList.length) return;
     const nextColId = visibleCols[nextCol].id;
-    const nextRowId = sorted[nextRow].id;
+    const nextRowId = navList[nextRow].id;
     setFocus({ rowId: nextRowId, colId: nextColId });
   };
 
@@ -439,6 +477,18 @@ export function PositionGrid({
         <div className="flex items-center gap-2">
           {headerExtras}
           <button
+            onClick={() => setGroupBySector((g) => !g)}
+            className="text-xs px-2 py-1 rounded flex items-center gap-1"
+            style={{
+              backgroundColor: groupBySector ? GOLD + '22' : 'transparent',
+              color: groupBySector ? GOLD : TEXT_DIM,
+              border: `1px solid ${groupBySector ? GOLD + '44' : BORDER}`,
+            }}
+            title="Group rows by sector"
+          >
+            <Layers size={12} /> {groupBySector ? 'Grouped' : 'Group by sector'}
+          </button>
+          <button
             onClick={() => onToggleEdit(!editMode)}
             className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
             style={{
@@ -474,39 +524,65 @@ export function PositionGrid({
         <table className="w-full text-sm" style={{ backgroundColor: PANEL }}>
           <thead>{headerRow}</thead>
           <tbody>
-            {sorted.map((p) => (
-              <tr
-                key={p.id}
-                style={{
-                  // Subtle accent tint when this row's current value is computed
-                  // from a live price (simulated) rather than the snapshot's
-                  // recorded soiMarketValue (manager-marked). Snap Px / Cost /
-                  // Value columns always show the manager's snapshot data;
-                  // MOIC and % NAV use the live-derived current value when
-                  // available.
-                  backgroundColor: p.hasLivePrice ? ACCENT + '0c' : 'transparent',
-                }}
-                title={p.hasLivePrice
-                  ? 'Simulated · MOIC and % NAV computed from live price for this token. Snapshot values (Snap Px / Cost / Value) remain manager-marked.'
-                  : 'Manager-marked · all values from this snapshot.'}
-              >
-                {COLUMNS.map((col) => renderCell(p, col))}
-                {editMode && (
-                  <td className="px-3 py-2 text-right" style={{ borderBottom: `1px solid ${BORDER}` }}>
-                    <button
-                      onClick={() => {
-                        if (window.confirm(`Delete position "${p.positionName}"?`)) onDelete(p.id);
-                      }}
-                      className="p-1 rounded"
-                      style={{ color: TEXT_DIM }}
-                      title="Delete row"
-                    >
-                      <Trash2 size={12} />
-                    </button>
+            {/* Flat (ungrouped) rendering — original layout. */}
+            {!groupBySector && sorted.map((p) => renderPositionRow(p, {
+              renderCell, editMode, onDelete, COLUMNS,
+            }))}
+
+            {/* Grouped rendering — cash bucket pinned at the head, then a
+                section per sector with a non-editable summary header row,
+                position rows, and (in editMode) a per-group "Add asset"
+                row at the bottom of the group (Cambridge UX). */}
+            {groupBySector && grouped && grouped.cash.map((p) => renderPositionRow(p, {
+              renderCell, editMode, onDelete, COLUMNS,
+            }))}
+            {groupBySector && grouped && grouped.groups.map((g) => (
+              <Fragment key={g.id}>
+                <tr style={{
+                  backgroundColor: g.sectorObj.color + '11',
+                  borderTop: `2px solid ${g.sectorObj.color}55`,
+                  borderBottom: `1px solid ${BORDER}`,
+                }}>
+                  <td className="px-3 py-2" colSpan={3}>
+                    <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: g.sectorObj.color }}>
+                      {g.sectorObj.label}
+                    </span>
+                    <span className="text-[10px] ml-2" style={{ color: TEXT_MUTE }}>
+                      {g.rows.length} {g.rows.length === 1 ? 'position' : 'positions'}
+                    </span>
                   </td>
+                  <td colSpan={3} />
+                  <td className="px-3 py-2 text-right tabular-nums font-medium" style={{ color: TEXT }}>
+                    {fmtCurrency(g.total)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: TEXT_DIM }}>
+                    {totalNAV > 0 ? fmtPct((g.total / totalNAV) * 100, 2) : '—'}
+                  </td>
+                  <td colSpan={COLUMNS.length - 8 + (editMode ? 1 : 0)} />
+                </tr>
+                {g.rows.map((p) => renderPositionRow(p, {
+                  renderCell, editMode, onDelete, COLUMNS,
+                }))}
+                {editMode && (
+                  <tr>
+                    <td colSpan={COLUMNS.length + 1} className="px-3 py-2" style={{ borderBottom: `1px solid ${BORDER}` }}>
+                      <button
+                        onClick={() => {
+                          const newId = onAdd(g.id);
+                          if (newId) setFocus({ rowId: newId, colId: editableCols[0].id });
+                        }}
+                        className="text-[11px] px-2 py-0.5 rounded inline-flex items-center gap-1"
+                        style={{ color: g.sectorObj.color, border: `1px solid ${g.sectorObj.color}44` }}
+                        title={`Add a position to ${g.sectorObj.label}`}
+                      >
+                        <Plus size={10} /> Add asset to {g.sectorObj.label}
+                      </button>
+                    </td>
+                  </tr>
                 )}
-              </tr>
+              </Fragment>
             ))}
+
             {sorted.length === 0 && (
               <tr>
                 <td
@@ -571,4 +647,40 @@ function editInputStyle(col) {
     minWidth: col.minWidth,
     outline: 'none',
   };
+}
+
+/* One row's <tr>. Extracted so flat and grouped tbody paths share the same
+   markup (live-price tint + per-row delete button when editing). */
+function renderPositionRow(p, { renderCell, editMode, onDelete, COLUMNS }) {
+  return (
+    <tr
+      key={p.id}
+      style={{
+        // Subtle accent tint when this row's current value is computed from
+        // a live price (simulated) rather than the snapshot's recorded
+        // soiMarketValue (manager-marked). MOIC and % NAV use live-derived
+        // current values when available.
+        backgroundColor: p.hasLivePrice ? ACCENT + '0c' : 'transparent',
+      }}
+      title={p.hasLivePrice
+        ? 'Simulated · MOIC and % NAV computed from live price for this token. Snapshot values (Snap Px / Cost / Value) remain manager-marked.'
+        : 'Manager-marked · all values from this snapshot.'}
+    >
+      {COLUMNS.map((col) => renderCell(p, col))}
+      {editMode && (
+        <td className="px-3 py-2 text-right" style={{ borderBottom: `1px solid ${BORDER}` }}>
+          <button
+            onClick={() => {
+              if (window.confirm(`Delete position "${p.positionName}"?`)) onDelete(p.id);
+            }}
+            className="p-1 rounded"
+            style={{ color: TEXT_DIM }}
+            title="Delete row"
+          >
+            <Trash2 size={12} />
+          </button>
+        </td>
+      )}
+    </tr>
+  );
 }

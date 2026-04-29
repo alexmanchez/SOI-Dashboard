@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, Plus, Save, X } from 'lucide-react';
+import { ArrowLeft, GripVertical, Plus, Save, Trash2, X } from 'lucide-react';
 
 import {
   PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
@@ -11,6 +11,7 @@ import { latestSnapshot, snapshotsOf } from '../lib/snapshots';
 import {
   positionPriorNAV, positionNewNAV, totalPriorNAV, sumPositionNewNAV,
   residualCash, applyTxns,
+  isCashBucket, getCashBucket, nonCashPositions,
 } from '../lib/snapshotDraft';
 
 import { Panel } from '../components/ui';
@@ -33,12 +34,33 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
     // Existing positions are already linked — they have names/tickers from the
     // prior snapshot. New ones (added below) start with _linked: false so the
     // search dropdown shows.
-    return (baseSnap.positions || []).map((p) => ({ ...p, txn: null, _linked: true }));
+    const seeded = (baseSnap.positions || []).map((p) => ({ ...p, txn: null, _linked: true }));
+    // Defensive: ensure a cash bucket exists even if storage migration missed
+    // this snapshot. Pin it as the first row so render order matches data order.
+    if (!seeded.some(isCashBucket)) {
+      seeded.unshift({
+        id: `cash_${Math.random().toString(36).slice(2, 10)}`,
+        isCashBucket: true,
+        positionName: 'Cash',
+        ticker: 'USD',
+        sectorId: 'cash',
+        soiMarketValue: 0,
+        quantity: 0,
+        assetType: 'Cash',
+        txn: null,
+        _linked: true,
+      });
+    }
+    return seeded;
   });
   const [cashflow, setCashflow] = useState(0);
 
+  // Split cash bucket from non-cash for rendering. Cash row is pinned at the
+  // top with a distinct treatment; everything else flows in declared order.
+  const cashRow = useMemo(() => getCashBucket(draft), [draft]);
+  const nonCash = useMemo(() => nonCashPositions(draft), [draft]);
   const priorTotal = useMemo(() => totalPriorNAV(draft), [draft]);
-  const newTotal = useMemo(() => sumPositionNewNAV(draft), [draft]);
+  const newTotal = useMemo(() => sumPositionNewNAV(nonCash) + (cashRow ? positionPriorNAV(cashRow) + residualCash(draft, cashflow) : 0), [nonCash, cashRow, draft, cashflow]);
   const residual = useMemo(() => residualCash(draft, cashflow), [draft, cashflow]);
   const dateConflict = useMemo(() => {
     if (!soi || !asOfDate) return false;
@@ -49,7 +71,14 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
   // the time (capital called but not yet deployed, distributions awaiting
   // wire, etc.). The user can save and reconcile cash on the next snapshot.
   const canSave = !dateConflict && !!asOfDate;
-  const residualSignificant = Math.abs(residual) >= 1;
+  // With a cash bucket present the residual is auto-absorbed, so the gold
+  // "leftover cash" warning treatment no longer applies. Keep the legacy
+  // warning for snapshots without a cash bucket (defensive).
+  const residualSignificant = !cashRow && Math.abs(residual) >= 1;
+
+  // Drag-to-reorder state. Hooks must run in the same order on every render,
+  // so this stays above the early-return guard below.
+  const [dragId, setDragId] = useState(null);
 
   if (!soi || !baseSnap) {
     return (
@@ -89,12 +118,50 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
     setDraft((d) => d.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
   };
 
+  const deletePosition = (id) => {
+    const pos = draft.find((p) => p.id === id);
+    if (!pos || isCashBucket(pos)) return; // cash row is non-deletable
+    if (!window.confirm(`Remove ${pos.positionName || 'this position'} from the new snapshot?`)) return;
+    setDraft((d) => d.filter((p) => p.id !== id));
+  };
+
+  // Drag-to-reorder via HTML5 DnD. The cash row is excluded from the
+  // affordance and the move logic guards against dropping anything onto
+  // (or above) it — it stays pinned at the head of the array.
+  const onDragStart = (id) => () => {
+    setDragId(id);
+  };
+  const onDragOver = (e) => {
+    if (dragId) e.preventDefault();
+  };
+  const onDrop = (targetId) => (e) => {
+    e.preventDefault();
+    if (!dragId || dragId === targetId) { setDragId(null); return; }
+    setDraft((d) => {
+      const fromIdx = d.findIndex((p) => p.id === dragId);
+      const toIdx = d.findIndex((p) => p.id === targetId);
+      if (fromIdx < 0 || toIdx < 0) return d;
+      const moved = d[fromIdx];
+      const target = d[toIdx];
+      if (isCashBucket(moved) || isCashBucket(target)) return d;
+      const next = d.slice();
+      next.splice(fromIdx, 1);
+      const adjustedTo = next.findIndex((p) => p.id === targetId);
+      next.splice(adjustedTo, 0, moved);
+      return next;
+    });
+    setDragId(null);
+  };
+  const onDragEnd = () => setDragId(null);
+
   const handleSave = () => {
     if (!canSave) return;
     // Strip the transient _linked flag before saving — it's a UI-only marker
     // for whether the row has been resolved to a token.
     const stripped = draft.map(({ _linked: _l, ...rest }) => rest);
-    const cleaned = applyTxns(stripped);
+    // applyTxns absorbs cashflow + B/S/C deltas into the cash bucket so the
+    // saved snapshot's cash position carries the correct end-of-period balance.
+    const cleaned = applyTxns(stripped, cashflow);
     const newSnap = {
       id: `s_${Math.random().toString(36).slice(2, 10)}`,
       asOfDate,
@@ -175,7 +242,7 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
         <Panel className="p-0 mb-4 overflow-hidden">
           <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${BORDER}` }}>
             <div className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>
-              Positions ({draft.length}) · Prior NAV {fmtCurrency(priorTotal)} → New NAV {fmtCurrency(newTotal)}
+              Positions ({nonCash.length}{cashRow ? ' + cash' : ''}) · Prior NAV {fmtCurrency(priorTotal)} → New NAV {fmtCurrency(newTotal)}
             </div>
             <button onClick={addBlankPosition}
               className="text-xs px-2 py-1 rounded flex items-center gap-1"
@@ -197,21 +264,79 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
                   <th className="text-right px-3 py-2">TXN %</th>
                   <th className="text-right px-3 py-2" style={{ color: ACCENT }}>New NAV</th>
                   <th className="text-right px-3 py-2" style={{ color: ACCENT }}>New %</th>
+                  <th className="text-right px-3 py-2" style={{ width: 56 }} aria-label="Row actions" />
                 </tr>
               </thead>
               <tbody>
-                {draft.map((p) => {
+                {cashRow && (() => {
+                  const priorNAV = positionPriorNAV(cashRow);
+                  const priorPct = priorTotal > 0 ? (priorNAV / priorTotal) * 100 : 0;
+                  const txnAmt = residual; // auto-derived absorption
+                  const newNAV = priorNAV + txnAmt;
+                  const newPct = newTotal > 0 ? (newNAV / newTotal) * 100 : 0;
+                  return (
+                    <tr style={{
+                      borderBottom: `1px solid ${BORDER}`,
+                      backgroundColor: GOLD + '0a',
+                      borderLeft: `2px solid ${GOLD}66`,
+                    }}>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium" style={{ color: GOLD }}>Cash</span>
+                          <span className="text-[10px] px-1 py-0.5 rounded" style={{ color: GOLD, border: `1px solid ${GOLD}44`, fontSize: 9 }}>USD</span>
+                        </div>
+                        <div className="text-[10px]" style={{ color: TEXT_MUTE }}>
+                          Auto-balanced from buys, sells, and cashflow
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="text-[10px] font-medium rounded px-1.5 py-0.5" style={{ backgroundColor: GOLD + '22', color: GOLD, border: `1px solid ${GOLD}44` }}>
+                          Cash
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums" style={{ color: TEXT_DIM }}>{fmtCurrency(priorNAV)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums" style={{ color: TEXT_DIM }}>{fmtPct(priorPct, 2)}</td>
+                      <td className="px-3 py-2 text-[10px]" style={{ color: TEXT_MUTE }}>
+                        Derived: −Buys + Sells − Allocations + Cashflow
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums" style={{ color: txnAmt > 0 ? GREEN : (txnAmt < 0 ? RED : TEXT_DIM) }}>
+                        {Math.abs(txnAmt) < 1 ? '—' : (txnAmt > 0 ? '+' : '') + fmtCurrency(txnAmt)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums" style={{ color: TEXT_DIM }}>
+                        {priorTotal > 0 && Math.abs(txnAmt) >= 1 ? fmtPct((txnAmt / priorTotal) * 100, 2) : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums font-medium" style={{ color: GOLD }}>{fmtCurrency(newNAV)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums" style={{ color: GOLD }}>{fmtPct(newPct, 2)}</td>
+                      <td className="px-3 py-2" />
+                    </tr>
+                  );
+                })()}
+                {nonCash.map((p) => {
                   const priorNAV = positionPriorNAV(p);
                   const priorPct = priorTotal > 0 ? (priorNAV / priorTotal) * 100 : 0;
-                  // Use the helper so $/% mode is honored. txnAmt is the signed
-                  // dollar delta to this position's NAV.
-                  const dollarAmt = p.txn ? (p.txn.mode === '%' ? (priorNAV * (Number(p.txn.amount) || 0)) / 100 : Number(p.txn.amount) || 0) : 0;
+                  // Use the helper so $/%/Qty mode is honored. txnAmt is the
+                  // signed dollar delta to this position's NAV.
+                  const dollarAmt = p.txn ? (
+                    p.txn.mode === '%'
+                      ? (priorNAV * (Number(p.txn.amount) || 0)) / 100
+                      : p.txn.mode === 'Qty'
+                        ? (Number(p.txn.amount) || 0) * (Number(p.soiPrice) || 0)
+                        : Number(p.txn.amount) || 0
+                  ) : 0;
                   const txnAmt = p.txn ? (p.txn.type === 'S' ? -dollarAmt : dollarAmt) : 0;
                   const newNAV = positionNewNAV(p);
                   const newPct = newTotal > 0 ? (newNAV / newTotal) * 100 : 0;
                   const sec = sectorOf(p.sectorId);
+                  const beingDragged = dragId === p.id;
                   return (
-                    <tr key={p.id} style={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: p.txn ? ACCENT + '0a' : 'transparent' }}>
+                    <tr key={p.id}
+                      onDragOver={onDragOver}
+                      onDrop={onDrop(p.id)}
+                      style={{
+                        borderBottom: `1px solid ${BORDER}`,
+                        backgroundColor: p.txn ? ACCENT + '0a' : 'transparent',
+                        opacity: beingDragged ? 0.4 : 1,
+                      }}>
                       <td className="px-3 py-2">
                         {p._linked ? (
                           <>
@@ -270,7 +395,12 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
                       <td className="px-3 py-2 text-right tabular-nums" style={{ color: TEXT_DIM }}>{fmtCurrency(priorNAV)}</td>
                       <td className="px-3 py-2 text-right tabular-nums" style={{ color: TEXT_DIM }}>{fmtPct(priorPct, 2)}</td>
                       <td className="px-3 py-2">
-                        <ChangeEditor txn={p.txn} priorNAV={priorNAV} onChange={(txn) => setTxn(p.id, txn)} />
+                        <ChangeEditor
+                          txn={p.txn}
+                          priorNAV={priorNAV}
+                          soiPrice={p.soiPrice}
+                          onChange={(txn) => setTxn(p.id, txn)}
+                        />
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums" style={{ color: txnAmt > 0 ? GREEN : (txnAmt < 0 ? RED : TEXT_DIM) }}>
                         {txnAmt === 0 ? '—' : (txnAmt > 0 ? '+' : '') + fmtCurrency(txnAmt)}
@@ -280,12 +410,34 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums font-medium" style={{ color: ACCENT }}>{fmtCurrency(newNAV)}</td>
                       <td className="px-3 py-2 text-right tabular-nums" style={{ color: ACCENT }}>{fmtPct(newPct, 2)}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center justify-end gap-1">
+                          <span
+                            draggable
+                            onDragStart={onDragStart(p.id)}
+                            onDragEnd={onDragEnd}
+                            className="cursor-grab active:cursor-grabbing p-0.5 rounded"
+                            style={{ color: TEXT_MUTE }}
+                            title="Drag to reorder"
+                          >
+                            <GripVertical size={12} />
+                          </span>
+                          <button
+                            onClick={() => deletePosition(p.id)}
+                            className="p-0.5 rounded"
+                            style={{ color: TEXT_DIM }}
+                            title="Delete row"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
-                {draft.length === 0 && (
+                {nonCash.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-xs" style={{ color: TEXT_DIM }}>
+                    <td colSpan={10} className="px-4 py-8 text-center text-xs" style={{ color: TEXT_DIM }}>
                       No positions yet. Click "Add asset" to start.
                     </td>
                   </tr>
@@ -318,11 +470,13 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
                 {residual >= 0 ? '+' : ''}{fmtCurrency(residual)}
               </div>
               <div className="text-[10px] mt-0.5" style={{ color: TEXT_MUTE }}>
-                {Math.abs(residual) < 1
-                  ? 'Cash unchanged — fully reinvested.'
-                  : residual > 0
-                    ? 'Net cash inflow. Save anyway — this rolls into the fund\'s cash position. Or use C tags to deploy it.'
-                    : 'Net cash outflow. Save anyway — represents capital called from the cash bucket. Or use S tags to fund it.'}
+                {cashRow
+                  ? 'Mirrors the auto-derived cash row above — every B/S/C and the cashflow input flow into it.'
+                  : (Math.abs(residual) < 1
+                    ? 'Cash unchanged — fully reinvested.'
+                    : residual > 0
+                      ? 'Net cash inflow. Save anyway — this rolls into the fund\'s cash position. Or use C tags to deploy it.'
+                      : 'Net cash outflow. Save anyway — represents capital called from the cash bucket. Or use S tags to fund it.')}
               </div>
             </div>
           </div>
@@ -332,14 +486,18 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
   );
 }
 
-/* Inline B/S/C tag selector + amount input + $/% mode toggle. Commits on every
-   keystroke. `mode` controls whether `amount` is read as dollars or as a
-   percentage of the position's prior NAV (priorNAV used only for the small
-   live preview underneath the input). */
-function ChangeEditor({ txn, priorNAV, onChange }) {
+/* Inline B/S/C tag selector + amount input + $/%/Qty mode toggle. Commits
+   on every keystroke. `mode` controls how `amount` is interpreted:
+     '$'   — literal dollar amount.
+     '%'   — percentage of priorNAV.
+     'Qty' — token quantity × soiPrice (disabled when soiPrice is missing).
+   priorNAV / soiPrice feed the small live preview to the right of the
+   input ("≈ $X,XXX"). */
+function ChangeEditor({ txn, priorNAV, soiPrice, onChange }) {
   const tag = txn?.type || '';
   const amount = txn?.amount ?? '';
   const mode = txn?.mode || '$';
+  const qtyEnabled = Number(soiPrice) > 0;
 
   const tagColor = (t) => (t === 'S' ? RED : t === 'B' ? GREEN : ACCENT);
 
@@ -367,12 +525,35 @@ function ChangeEditor({ txn, priorNAV, onChange }) {
 
   const setMode = (nextMode) => commit(tag, amount, nextMode);
 
-  // Preview the dollar value when in % mode so the user can see what it works
-  // out to. e.g., "S 50% → $1.5M of $3.0M".
+  // Cycle $ → % → Qty → $. Skip Qty when there's no snapshot price for this
+  // position (the dollar value would be 0). The Qty button has its own
+  // tooltip explaining why in that case.
+  const cycleMode = () => {
+    if (mode === '$') return setMode('%');
+    if (mode === '%') return setMode(qtyEnabled ? 'Qty' : '$');
+    return setMode('$'); // from Qty
+  };
+
+  // Preview the dollar value for non-$ modes so the user can see what their
+  // input works out to. e.g., "S 50% → $1.5M" or "B 10 → ≈ $42,000".
   const dollarPreview = (() => {
-    if (mode !== '%' || amount === '' || !priorNAV) return null;
-    const dollars = (priorNAV * (Number(amount) || 0)) / 100;
-    return dollars;
+    if (amount === '') return null;
+    if (mode === '%' && priorNAV) {
+      return (priorNAV * (Number(amount) || 0)) / 100;
+    }
+    if (mode === 'Qty' && qtyEnabled) {
+      return (Number(amount) || 0) * Number(soiPrice);
+    }
+    return null;
+  })();
+
+  const modeLabel = mode === '$' ? '$' : mode === '%' ? '%' : 'Qty';
+  const modeTooltip = (() => {
+    if (mode === '$') return 'Dollar amount — click to switch to % of prior NAV';
+    if (mode === '%') return qtyEnabled
+      ? 'Percentage of prior NAV — click to switch to token quantity'
+      : 'Percentage of prior NAV — click to switch back to dollars (Qty disabled, no snapshot price)';
+    return 'Token quantity × snapshot price — click to switch back to dollars';
   })();
 
   return (
@@ -398,25 +579,26 @@ function ChangeEditor({ txn, priorNAV, onChange }) {
       <div className="flex items-center" style={{ border: `1px solid ${BORDER}`, borderRadius: 4, overflow: 'hidden' }}>
         <input
           type="number"
-          placeholder={mode === '%' ? 'pct' : 'amount'}
+          placeholder={mode === '%' ? 'pct' : mode === 'Qty' ? 'qty' : 'amount'}
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           className="text-sm px-1.5 py-0.5 w-20 tabular-nums outline-none"
           style={{ backgroundColor: PANEL_2, border: 'none', color: TEXT }}
         />
         <button
-          onClick={() => setMode(mode === '$' ? '%' : '$')}
-          title={mode === '$' ? 'Switch to percentage of position' : 'Switch to dollar amount'}
+          onClick={cycleMode}
+          title={modeTooltip}
           className="text-[10px] font-semibold px-1.5"
           style={{
             backgroundColor: PANEL,
-            color: mode === '%' ? ACCENT : TEXT_DIM,
+            color: mode === '$' ? TEXT_DIM : ACCENT,
             borderLeft: `1px solid ${BORDER}`,
             cursor: 'pointer',
             height: '100%',
             minHeight: 22,
+            minWidth: mode === 'Qty' ? 28 : 18,
           }}
-        >{mode === '$' ? '$' : '%'}</button>
+        >{modeLabel}</button>
       </div>
       {dollarPreview != null && (
         <span className="text-[10px] tabular-nums" style={{ color: TEXT_MUTE }}>

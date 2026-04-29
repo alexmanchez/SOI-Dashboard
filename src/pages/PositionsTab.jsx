@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 
 import {
-  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, GREEN, GOLD,
+  PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, GREEN, GOLD,
 } from '../lib/theme';
 import {
   fmtCurrency, fmtPct,
@@ -140,6 +140,15 @@ export function PositionsTab({ rollup, store: _store, updateStore }) {
         <div className="text-xs" style={{color:TEXT_DIM}}>{rows.length} tokens</div>
       </Panel>
       <Panel className="p-0 overflow-hidden">
+        {rows.some((t) => t.hasLivePrice) && (
+          <div
+            className="px-4 py-2 text-[10px] flex items-center gap-2"
+            style={{ color: TEXT_MUTE, borderBottom: `1px solid ${BORDER}` }}
+          >
+            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, backgroundColor: ACCENT + '33', border: `1px solid ${ACCENT}55` }} />
+            Tinted rows use live prices — current value reflects the latest CoinGecko fetch; manager-marked snapshot values feed everything else.
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -194,7 +203,18 @@ export function PositionsTab({ rollup, store: _store, updateStore }) {
 
 function PositionRow({ t, changeSector, flipForceLiquid, indent }) {
   return (
-    <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+    <tr
+      style={{
+        borderBottom: `1px solid ${BORDER}`,
+        // Subtle accent tint when this row's value is computed from live
+        // prices — same treatment as the per-fund PositionGrid so the global
+        // and per-fund views read consistently.
+        backgroundColor: t.hasLivePrice ? ACCENT + '0c' : 'transparent',
+      }}
+      title={t.hasLivePrice
+        ? 'Simulated · current value computed from live price for this token. Manager-marked snapshot values feed into the rollup.'
+        : 'Manager-marked · all values from snapshot rollup.'}
+    >
       <td className="px-3 py-2.5" style={{ paddingLeft: indent ? 32 : undefined }}>
         <div className="font-medium">{t.symbol || t.name}</div>
         {t.symbol && t.name !== t.symbol && <div className="text-[10px]" style={{ color: TEXT_MUTE }}>{t.name}</div>}

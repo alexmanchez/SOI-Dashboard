@@ -182,8 +182,9 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
   };
 
   /* Append a blank row to the selected snapshot and return its id so the
-     grid can focus the new row's first cell. */
-  const addBlankPosition = () => {
+     grid can focus the new row's first cell. Accepts an optional sectorId
+     so the per-group "Add asset" button can prefill the new row's sector. */
+  const addBlankPosition = (sectorId) => {
     const newId = uid();
     updateStore(s => ({
       ...s,
@@ -202,7 +203,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
               costBasis: null,
               acquisitionDate: null,
               assetType: 'Liquid Token',
-              sectorId: 'unclassified',
+              sectorId: sectorId || 'unclassified',
               forceLiquid: false,
               cgTokenId: null,
               chain: null,

@@ -1,13 +1,20 @@
 // CoinMarketCap Pro API: ticker -> id mapping + logo URLs.
+// Supplied via VITE_COINMARKETCAP_API_KEY in .env.local. Empty string degrades
+// gracefully — cmcFetch returns a "no API key configured" error and the
+// CMC-derived logo path is skipped (TokenIcon falls back to CryptoRank /
+// jsdelivr).
 export const EMBEDDED_CMC_API_KEY =
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_COINMARKETCAP_API_KEY) ||
-  'a88a40ca0937478c9263d39a1fbf5a62';
+  '';
 
 export const CMC_IMG = (id) => `https://s2.coinmarketcap.com/static/img/coins/64x64/${id}.png`;
 // Animated GIFs exist for top tokens; 403 on unsupported tokens falls through to PNG.
 export const CMC_GIF = (id) => `https://s2.coinmarketcap.com/static/img/coins/64x64/${id}.gif`;
 
 export const cmcFetch = async (path) => {
+  if (!EMBEDDED_CMC_API_KEY) {
+    return { data: null, error: 'No CoinMarketCap API key configured (VITE_COINMARKETCAP_API_KEY).' };
+  }
   try {
     const res = await fetch(`https://pro-api.coinmarketcap.com${path}`, {
       headers: { 'X-CMC_PRO_API_KEY': EMBEDDED_CMC_API_KEY, Accept: 'application/json' },
