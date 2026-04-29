@@ -1,0 +1,41 @@
+version: 2
+updates:
+  # Weekly grouped patch + minor updates for npm. One PR per week keeps the
+  # review queue manageable; security updates run on a separate immediate
+  # schedule so they don't wait for the weekly cycle.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      patch-and-minor:
+        applies-to: version-updates
+        update-types:
+          - patch
+          - minor
+      security:
+        applies-to: security-updates
+        update-types:
+          - patch
+          - minor
+          - major
+
+  # GitHub Actions versions in workflows under .github/workflows/.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: chore
