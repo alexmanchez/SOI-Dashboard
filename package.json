@@ -10,7 +10,7 @@
     "lint": "eslint src --max-warnings=0",
     "format": "prettier --write src",
     "test": "vitest run",
-    "verify": "npm run lint && npm test && npm run build && npm install --package-lock-only && git diff --quiet package-lock.json"
+    "verify": "npm ci --no-audit --no-fund && npm run lint && npm test && npm run build"
   },
   "dependencies": {
     "lodash": "^4.17.21",
