@@ -22,7 +22,6 @@ import {
   autoMapColumns, detectHeaderRow, dedupeHeaders,
 } from '../lib/parsing';
 import { snapshotsOf, latestSnapshot } from '../lib/snapshots';
-
 import { Modal, ChoiceCard } from '../components/ui';
 
 export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {

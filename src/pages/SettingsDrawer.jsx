@@ -18,7 +18,6 @@ import {
 } from '../lib/storage';
 import { snapshotsOf, latestSnapshot } from '../lib/snapshots';
 import { EMBEDDED_CG_API_KEY } from '../lib/api/coingecko';
-
 import {
   Modal,
 } from '../components/ui';

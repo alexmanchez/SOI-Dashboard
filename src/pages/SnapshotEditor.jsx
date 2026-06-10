@@ -13,7 +13,6 @@ import {
   residualCash, applyTxns,
   isCashBucket, getCashBucket, nonCashPositions,
 } from '../lib/snapshotDraft';
-
 import { Panel } from '../components/ui';
 import { TokenSearch } from '../components/TokenSearch';
 

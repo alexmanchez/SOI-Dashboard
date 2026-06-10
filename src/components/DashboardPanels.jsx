@@ -11,7 +11,6 @@ import {
 import { fmtCurrency, fmtPct, fmtPctSigned } from '../lib/format';
 import { MOVER_RANGES, rangeToStartMs } from '../lib/ranges';
 import { OpenTokenDetailContext } from '../contexts';
-
 import {
   Panel, SectorBadge, LiquidityBadge, ChangeCell,
 } from './ui';

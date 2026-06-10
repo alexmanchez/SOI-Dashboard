@@ -1,11 +1,12 @@
 import {
   useState, useMemo, useCallback, useEffect,
 } from 'react';
-import catenaLogo from './assets/catena-logo.png';
 import _ from 'lodash';
 import {
   Settings, DollarSign,
 } from 'lucide-react';
+
+import catenaLogo from './assets/catena-logo.png';
 import {
   BG, PANEL, BORDER, TEXT, TEXT_DIM, TEXT_MUTE,
 } from './lib/theme';
@@ -38,7 +39,6 @@ import {
 import {
   TokenImageContext, OpenTokenDetailContext,
 } from './contexts';
-
 import {
   PlaceholderPage,
 } from './components/ui';
@@ -53,7 +53,6 @@ import { SearchBox } from './components/SearchBox';
 import { ContextRow } from './components/ContextRow';
 import { ScopeHeader } from './components/ScopeHeader';
 import { TimeSlider } from './components/TimeSlider';
-
 import {
   OverviewTab,
 } from './pages/OverviewTab';

@@ -1,4 +1,5 @@
 import _ from 'lodash';
+
 import {
   snapshotsOf, snapshotAsOf, sortedSnapshots, isLiquid,
 } from './snapshots';

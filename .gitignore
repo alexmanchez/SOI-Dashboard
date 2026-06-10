@@ -27,11 +27,11 @@ _sweep_unused.py
 _strip_react.py
 _debug.py
 
-# Local-only Claude Code settings
-.claude/settings.local.json
-
-# Local Claude Code worktrees — these are per-developer scratch dirs
-.claude/worktrees/
+# Claude Code artifacts — keep only the project-level launch config in
+# version control; everything else (worktrees, sessions, cache, settings,
+# transcripts) is per-developer scratch state.
+.claude/
+!.claude/launch.json
 
 # Personal calendar file accidentally committed in an early sprint
 Reminder.ics

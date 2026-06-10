@@ -51,7 +51,17 @@ export default [
       'no-useless-escape': 'off',
       'no-empty': 'off',
       'no-prototype-builtins': 'off',
-      'import/order': 'off',
+      // Group order: builtins/externals first, then a blank line, then
+      // relative imports. We don't alphabetize within groups since the
+      // existing code clusters imports by topic (theme, format, snapshots,
+      // …) and an alphabetical sort would scramble those clusters.
+      'import/order': [
+        'error',
+        {
+          groups: [['builtin', 'external'], ['parent', 'sibling', 'index']],
+          'newlines-between': 'always',
+        },
+      ],
       'import/no-unresolved': 'off',
       'import/no-named-as-default-member': 'off',
       ...prettier.rules,
