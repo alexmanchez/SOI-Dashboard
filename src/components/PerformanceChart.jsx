@@ -45,7 +45,7 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
 
   // Trigger fetch if we're missing data
   useEffect(() => {
-    if (!apiKey || !tokenIds.length) return;
+    if (!tokenIds.length) return;
     onRequestFetch?.(tokenIds, daysNeeded);
   }, [tokenIds.join(','), daysNeeded, apiKey]);
 
@@ -66,7 +66,7 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
   const lineColor = positive ? GREEN : RED;
 
   const tokensCovered = tokenIds.filter(id => priceHistory[id]).length;
-  const needsData = apiKey && tokenIds.length > 0 && tokensCovered < tokenIds.length;
+  const needsData = tokenIds.length > 0 && tokensCovered < tokenIds.length;
 
   const yMin = useMemo(() => {
     const vals = series.map(s => s.value).filter(v => v > 0);
@@ -117,14 +117,14 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
         </div>
       )}
 
-      {!apiKey && (
-        <div className="flex items-center justify-center text-xs p-6 rounded"
-          style={{backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px dashed ${BORDER}`, height}}>
-          No CoinGecko API key configured. Set VITE_COINGECKO_API_KEY at build time, or paste an override in Settings.
+      {!apiKey && !compact && tokenIds.length > 0 && (
+        <div className="text-[10px] mb-2 px-2 py-1 rounded" style={{color: TEXT_MUTE, backgroundColor: PANEL_2, border: `1px dashed ${BORDER}`}}>
+          No CoinGecko API key — using the public tier, which is rate-limited and may load
+          slowly or partially. Add a free Demo key in Settings for reliable history.
         </div>
       )}
 
-      {apiKey && historyLoading && (
+      {historyLoading && (
         <div className="flex flex-col items-center justify-center text-xs rounded gap-2"
           style={{backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px dashed ${BORDER}`, height}}>
           <RefreshCw size={16} className="animate-spin" style={{color:ACCENT}} />
@@ -136,14 +136,14 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
         </div>
       )}
 
-      {apiKey && !historyLoading && needsData && (
+      {!historyLoading && needsData && (
         <div className="flex items-center justify-center text-xs p-6 rounded"
           style={{backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px dashed ${BORDER}`, height}}>
           History not yet loaded for this range. Click "Refresh prices" to fetch.
         </div>
       )}
 
-      {apiKey && !historyLoading && !needsData && series.length > 0 && (
+      {!historyLoading && !needsData && series.length > 0 && (
         <div style={{width:'100%', height}}>
           <ResponsiveContainer>
             <AreaChart data={series} margin={{top: 8, right: 8, left: 0, bottom: 0}}>
@@ -208,7 +208,7 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
         </div>
       )}
 
-      {apiKey && !historyLoading && !series.length && (
+      {!historyLoading && !series.length && (
         <div className="flex items-center justify-center text-xs p-6 rounded"
           style={{backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px dashed ${BORDER}`, height}}>
           No data in this range.

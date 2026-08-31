@@ -1,5 +1,5 @@
 import {
-  useMemo, useRef, useState,
+  useEffect, useMemo, useRef, useState,
 } from 'react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -22,9 +22,11 @@ import {
   autoMapColumns, detectHeaderRow, dedupeHeaders,
 } from '../lib/parsing';
 import { snapshotsOf, latestSnapshot } from '../lib/snapshots';
+import { fetchAllCoins, searchCoins } from '../lib/api/coingecko';
 import { Modal, ChoiceCard } from '../components/ui';
+import { TokenSearch } from '../components/TokenSearch';
 
-export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
+export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget, apiKey }) {
   // If prefilled (quarterly update), jump straight to upload step and pre-select the target
   const isReplaceMode = !!prefillTarget;
   const prefilledSoi = prefillTarget ? store.soIs.find(s => s.id === prefillTarget.soiId) : null;
@@ -58,6 +60,17 @@ export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarge
   const [newManagerType, setNewManagerType] = useState('direct');
   const [vintage, setVintage] = useState(prefilledSoi?.vintage || '');
   const [asOfDate, setAsOfDate] = useState(today());
+  // CoinGecko coin list (24h-cached upstream), used to auto-link parsed
+  // spreadsheet rows to a cgTokenId by exact ticker match.
+  const [coinList, setCoinList] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await fetchAllCoins(apiKey);
+      if (!cancelled && data) setCoinList(data);
+    })();
+    return () => { cancelled = true; };
+  }, [apiKey]);
   const [committed, setCommitted] = useState('');
 
   // Manual entry state
@@ -145,6 +158,17 @@ export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarge
         if (DEFAULT_TOKEN_SECTOR[sym]) sectorId = DEFAULT_TOKEN_SECTOR[sym];
       }
 
+      let cgTokenId = null;
+      if (ticker && coinList) {
+        const sym = ticker.toLowerCase();
+        const hits = searchCoins(coinList, sym, 8).filter(
+          (c) => (c.symbol || '').toLowerCase() === sym
+        );
+        // Only auto-link when the symbol is unambiguous. Many tickers are
+        // reused across chains; guessing would attach the wrong price series.
+        if (hits.length === 1) cgTokenId = hits[0].id;
+      }
+
       out.push({
         id: uid(),
         positionName: name,
@@ -153,11 +177,11 @@ export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarge
         acquisitionDate: acq ? acq.toISOString().slice(0,10) : null,
         assetType, sectorId,
         forceLiquid: false,
-        cgTokenId: null, chain: null, address: null, notes: '',
+        cgTokenId, chain: null, address: null, notes: '',
       });
     }
     return out;
-  }, [rows, columnMap]);
+  }, [rows, columnMap, coinList]);
 
   const finalize = () => {
     const positions = mode === 'manual'
@@ -172,7 +196,7 @@ export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarge
           acquisitionDate: p.acquisitionDate || null,
           assetType: p.assetType || 'Unclassified',
           sectorId: p.sectorId,
-          liquidityOverride: 'auto', cgTokenId: null, chain: null, address: null, notes: '',
+          liquidityOverride: 'auto', cgTokenId: p.cgTokenId || null, chain: null, address: null, notes: '',
         }))
       : parsedPositions;
 
@@ -251,7 +275,7 @@ export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarge
           <ChoiceCard icon={FileSpreadsheet} title="Upload holdings file" desc="Excel or CSV. We'll auto-detect columns."
             onClick={() => { setMode('upload'); setStep(1); }} />
           <ChoiceCard icon={Edit2} title="Enter manually" desc="Type positions by hand — useful for small books."
-            onClick={() => { setMode('manual'); setStep(3); setManualPositions([{ positionName: '', ticker: '', quantity: '', soiMarketValue: '', sectorId: 'infrastructure', acquisitionDate: '', assetType: 'Liquid Token' }]); }} />
+            onClick={() => { setMode('manual'); setStep(3); setManualPositions([{ positionName: '', ticker: '', cgTokenId: null, quantity: '', soiMarketValue: '', sectorId: 'infrastructure', acquisitionDate: '', assetType: 'Liquid Token' }]); }} />
         </div>
       )}
 
@@ -451,7 +475,7 @@ export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarge
                 <table className="w-full text-xs">
                   <thead>
                     <tr style={{color:TEXT_MUTE}}>
-                      <th className="text-left px-2 py-1">Name *</th>
+                      <th className="text-left px-2 py-1">Name * <span style={{color:TEXT_MUTE}}>(search to link prices)</span></th>
                       <th className="text-left px-2 py-1">Ticker</th>
                       <th className="text-right px-2 py-1">Qty</th>
                       <th className="text-right px-2 py-1">Market Value *</th>
@@ -463,7 +487,27 @@ export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarge
                   <tbody>
                     {manualPositions.map((p, i) => (
                       <tr key={i}>
-                        <td className="px-1 py-1"><input value={p.positionName} onChange={e=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,positionName:e.target.value}:x))} className="w-full px-2 py-1 rounded text-xs outline-none" style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} /></td>
+                        <td className="px-1 py-1" style={{minWidth: 200}}>
+                          {/* Picking a match sets cgTokenId, which is what makes live
+                              and historical prices possible for this row. Free text
+                              still works — SAFTs and warrants aren't on CoinGecko. */}
+                          <TokenSearch
+                            value={p.positionName}
+                            apiKey={apiKey}
+                            placeholder="Search token, or type a name"
+                            onChange={(v)=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,positionName:v}:x))}
+                            onSelect={(coin)=>setManualPositions(manualPositions.map((x,j)=>j===i?{
+                              ...x,
+                              positionName: coin.name || x.positionName,
+                              ticker: coin.symbol ? coin.symbol.toUpperCase() : x.ticker,
+                              cgTokenId: coin.id || null,
+                              assetType: coin.id ? 'Liquid Token' : (x.assetType || 'SAFT'),
+                            }:x))}
+                          />
+                          {p.cgTokenId
+                            ? <div className="text-[10px] mt-0.5" style={{color:ACCENT}}>linked: {p.cgTokenId}</div>
+                            : <div className="text-[10px] mt-0.5" style={{color:TEXT_MUTE}}>unlinked — no price history</div>}
+                        </td>
                         <td className="px-1 py-1"><input value={p.ticker} onChange={e=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,ticker:e.target.value}:x))} className="w-20 px-2 py-1 rounded text-xs outline-none" style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} /></td>
                         <td className="px-1 py-1"><input value={p.quantity} onChange={e=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,quantity:e.target.value}:x))} className="w-24 px-2 py-1 rounded text-xs text-right outline-none tabular-nums" style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} /></td>
                         <td className="px-1 py-1"><input value={p.soiMarketValue} onChange={e=>setManualPositions(manualPositions.map((x,j)=>j===i?{...x,soiMarketValue:e.target.value}:x))} className="w-28 px-2 py-1 rounded text-xs text-right outline-none tabular-nums" style={{backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}`}} /></td>
@@ -481,7 +525,7 @@ export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarge
                   </tbody>
                 </table>
               </div>
-              <button onClick={()=>setManualPositions([...manualPositions, { positionName: '', ticker: '', quantity: '', soiMarketValue: '', sectorId: 'infrastructure', acquisitionDate: '', assetType: 'Liquid Token' }])}
+              <button onClick={()=>setManualPositions([...manualPositions, { positionName: '', ticker: '', cgTokenId: null, quantity: '', soiMarketValue: '', sectorId: 'infrastructure', acquisitionDate: '', assetType: 'Liquid Token' }])}
                 className="text-xs px-3 py-1.5 rounded flex items-center gap-1"
                 style={{color: TEXT_DIM, border: `1px dashed ${BORDER}`}}><Plus size={12}/> Add row</button>
             </div>

@@ -209,10 +209,6 @@ export default function App() {
       setPriceError('Live prices are OFF. Toggle "Live: ON" in the header to enable CoinGecko fetches.');
       return;
     }
-    if (!effectiveApiKey) {
-      setPriceError('CoinGecko API key not configured. Set VITE_COINGECKO_API_KEY at build time or paste a key in Settings.');
-      return;
-    }
     setPriceLoading(true); setPriceError(null);
     const { prices, error } = await fetchLivePrices(allCgIds, effectiveApiKey);
     setLivePrices(prices);
@@ -225,10 +221,6 @@ export default function App() {
   // Skips tokens we already have sufficient history for.
   const fetchHistoryFor = useCallback(async (tokenIds, daysNeeded) => {
     if (!store.settings.useLivePrices) return; // silent skip: chart shows existing cached data
-    if (!effectiveApiKey) {
-      setPriceError('CoinGecko API key not configured. Set VITE_COINGECKO_API_KEY at build time or paste a key in Settings.');
-      return;
-    }
     const cappedDays = Math.min(daysNeeded, 365);  // CoinGecko Demo limit
     const ids = _.uniq(tokenIds).filter(Boolean);
     const missing = ids.filter(id => (historyFetched[id] || 0) < cappedDays);
@@ -589,6 +581,7 @@ export default function App() {
         <ImportWizard
           store={store}
           updateStore={updateStore}
+          apiKey={effectiveApiKey}
           onClose={() => setImportOpen(false)}
           onDone={() => { setImportOpen(false); }}
         />

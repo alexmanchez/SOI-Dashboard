@@ -741,12 +741,17 @@ export function AddCommitmentForm({ store, updateStore }) {
   const [open, setOpen] = useState(false);
   const [clientId, setClientId] = useState('');
   const [managerId, setManagerId] = useState('');
+  const [fundName, setFundName] = useState('');
   const [vintage, setVintage] = useState('');
+  const [asOf, setAsOf] = useState(today());
   const [committed, setCommitted] = useState('');
   const [called, setCalled] = useState('');
   const [distributions, setDistributions] = useState('');
 
-  const canSave = clientId && managerId && vintage.trim();
+  // fundName and vintage are separate fields because fundLabel() renders them
+  // as "Fund III (2024)" — a manager routinely runs several vintages, so the
+  // pair is what identifies a fund, not either half alone.
+  const canSave = clientId && managerId && fundName.trim() && !!asOf;
   const disabledReason = store.clients.length === 0
     ? 'Add a client first.'
     : store.managers.length === 0
@@ -757,10 +762,14 @@ export function AddCommitmentForm({ store, updateStore }) {
     if (!canSave) return;
     const soiId = uid();
     const commitmentId = uid();
-    const asOfDate = new Date().toISOString().slice(0, 10);
+    // The baseline snapshot carries the SOI's own as-of date (e.g. a 12/31
+    // year-end statement), not today's date — backdating it afterwards isn't
+    // possible from the fund view, so it has to be right at creation.
+    const asOfDate = asOf;
     const newSoi = {
       id: soiId,
       managerId,
+      fundName: fundName.trim(),
       vintage: vintage.trim(),
       snapshots: [{
         id: soiId + '_snap',
@@ -786,7 +795,8 @@ export function AddCommitmentForm({ store, updateStore }) {
       soIs: [...s.soIs, newSoi],
       commitments: [...s.commitments, newCommitment],
     }));
-    setClientId(''); setManagerId(''); setVintage('');
+    setClientId(''); setManagerId(''); setFundName(''); setVintage('');
+    setAsOf(today());
     setCommitted(''); setCalled(''); setDistributions('');
     setOpen(false);
   };
@@ -830,12 +840,39 @@ export function AddCommitmentForm({ store, updateStore }) {
           </select>
         </div>
       </div>
-      <input
-        type="text" value={vintage} onChange={(e) => setVintage(e.target.value)}
-        placeholder="Fund / vintage label (e.g. Fund III, 2024 Vintage)"
-        className="w-full text-sm rounded px-2 py-1 outline-none"
-        style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}
-      />
+      <div className="grid grid-cols-3 gap-2">
+        <div className="col-span-2">
+          <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{ color: TEXT_MUTE }}>Fund name</label>
+          <input
+            type="text" value={fundName} onChange={(e) => setFundName(e.target.value)}
+            placeholder="e.g. Token Growth Fund II"
+            className="w-full text-sm rounded px-2 py-1 outline-none"
+            style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}
+          />
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{ color: TEXT_MUTE }}>Vintage</label>
+          <input
+            type="text" value={vintage} onChange={(e) => setVintage(e.target.value)}
+            placeholder="2024"
+            className="w-full text-sm rounded px-2 py-1 outline-none"
+            style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}
+          />
+        </div>
+      </div>
+      <div>
+        <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{ color: TEXT_MUTE }}>
+          Statement date (as of)
+        </label>
+        <input
+          type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)}
+          className="w-full text-xs rounded px-2 py-1 outline-none"
+          style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}
+        />
+        <div className="text-[10px] mt-0.5" style={{ color: TEXT_MUTE }}>
+          Date of the SOI these figures come from — e.g. 2025-12-31 for a year-end statement.
+        </div>
+      </div>
       <div className="grid grid-cols-3 gap-2">
         <div>
           <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{ color: TEXT_MUTE }}>Committed ($)</label>

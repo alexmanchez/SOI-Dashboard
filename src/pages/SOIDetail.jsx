@@ -10,7 +10,7 @@ import {
   PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT_2, RED, GOLD,
 } from '../lib/theme';
 import {
-  fmtCurrency, fmtPct, fmtMoic, fundLabel, uid,
+  fmtCurrency, fmtPct, fmtMoic, fundLabel, uid, today,
 } from '../lib/format';
 import {
   getSectors, resolveSector,
@@ -27,6 +27,7 @@ import {
 import {
   TopMoversPanel, LiquidityBreakdownPanel,
 } from '../components/DashboardPanels';
+import { commitmentAsOf, sortedCommitments } from '../lib/commitments';
 import { PositionEditor } from './PositionEditor';
 import { ImportWizard } from '../import/ImportWizard';
 import { PositionGrid } from '../components/PositionGrid';
@@ -138,6 +139,26 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
     }));
     const remaining = snaps.filter(s => s.id !== snapId);
     setSelectedSnapId(remaining[remaining.length - 1]?.id ?? null);
+  };
+
+  /* Re-date the selected snapshot. Snapshots are keyed by date for
+     time-travel (snapshotAsOf walks them in order), so a duplicate date makes
+     one of the two unreachable — reject rather than silently shadow it. */
+  const setSnapshotDate = (snapId, nextDate) => {
+    if (!nextDate) return;
+    if (snapshotsOf(soi).some((sn) => sn.id !== snapId && (sn.asOfDate || '') === nextDate)) {
+      alert(`This fund already has a snapshot dated ${nextDate}.`);
+      return;
+    }
+    updateStore(s => ({
+      ...s,
+      soIs: s.soIs.map(x => x.id !== soiId ? x : {
+        ...x,
+        snapshots: snapshotsOf(x)
+          .map(sn => sn.id !== snapId ? sn : { ...sn, asOfDate: nextDate })
+          .sort((a, b) => ((a.asOfDate || '') < (b.asOfDate || '') ? -1 : 1)),
+      }),
+    }));
   };
 
   const cycleLiquidity = (posId) => {
@@ -278,6 +299,14 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
                     </option>
                   ))}
                 </select>
+                <input
+                  type="date"
+                  value={selectedSnap?.asOfDate || ''}
+                  onChange={(e) => setSnapshotDate(selectedSnapId, e.target.value)}
+                  title="Statement date for the selected snapshot"
+                  className="text-xs px-2 py-1 rounded outline-none"
+                  style={{ color: GOLD, backgroundColor: GOLD + '11', border: `1px solid ${GOLD}44` }}
+                />
                 {snaps.length > 1 && (
                   <button onClick={() => deleteSnapshot(selectedSnapId)}
                     className="text-xs px-2 py-1 rounded flex items-center gap-1"
@@ -296,7 +325,15 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
             ) : (
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{color:GOLD, backgroundColor:GOLD+'11', border:`1px solid ${GOLD}44`}}>
-                  As of {selectedSnap?.asOfDate || '—'}
+                  As of
+                  <input
+                    type="date"
+                    value={selectedSnap?.asOfDate || ''}
+                    onChange={(e) => setSnapshotDate(selectedSnap?.id, e.target.value)}
+                    title="Statement date for this snapshot"
+                    className="text-xs outline-none"
+                    style={{ color: GOLD, backgroundColor: 'transparent', border: 'none' }}
+                  />
                 </span>
                 {onCreateSnapshot && (
                   <button onClick={() => onCreateSnapshot(soi.id)}
@@ -346,7 +383,11 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
       )}
 
       {showEconomics && (() => {
-        const commitment = store.commitments.find(c => c.soiId === soi.id);
+        // Economics are dated rows, same as snapshots: pick the row in force
+        // as of the snapshot being viewed so NAV and called capital describe
+        // the same moment. Falls back to the latest row.
+        const commitRows = sortedCommitments(store.commitments, soi.id);
+        const commitment = commitmentAsOf(store.commitments, soi.id, selectedSnap?.asOfDate);
         if (!commitment) {
           return (
             <Panel className="p-5">
@@ -366,9 +407,57 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
         const updateCommitment = (patch) => updateStore(s => ({
           ...s, commitments: s.commitments.map(c => c.id === commitment.id ? { ...c, ...patch } : c),
         }));
+        /* Record economics for a new period instead of overwriting. Called and
+           distributions ratchet over a fund's life, so overwriting the only row
+           destroys the prior period's figures and breaks time-travel. */
+        const addDatedUpdate = () => {
+          const nextDate = window.prompt(
+            'Statement date for the new economics row (YYYY-MM-DD):',
+            selectedSnap?.asOfDate || today()
+          );
+          if (!nextDate) return;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) { alert('Please use YYYY-MM-DD.'); return; }
+          if (commitRows.some(c => (c.asOfDate || '') === nextDate)) {
+            alert(`An economics row dated ${nextDate} already exists for this fund.`);
+            return;
+          }
+          const row = {
+            ...commitment,
+            id: uid(),
+            asOfDate: nextDate,
+          };
+          updateStore(s => ({ ...s, commitments: [...s.commitments, row] }));
+        };
         return (
           <Panel className="p-5">
-            <div className="text-xs uppercase tracking-wider mb-3" style={{color:TEXT_MUTE}}>Fund economics</div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>
+                Fund economics
+                {commitment.asOfDate && (
+                  <span className="ml-2 normal-case tracking-normal" style={{color:TEXT_DIM}}>
+                    as of {commitment.asOfDate}
+                  </span>
+                )}
+              </div>
+              <button onClick={addDatedUpdate}
+                className="text-xs px-2 py-1 rounded flex items-center gap-1"
+                style={{color:ACCENT_2, border:`1px solid ${ACCENT_2}44`}}>
+                <Plus size={10}/> Add dated update
+              </button>
+            </div>
+            {commitRows.length > 1 && (
+              <div className="text-[11px] mb-3 flex flex-wrap gap-1.5" style={{color:TEXT_MUTE}}>
+                {commitRows.map(c => (
+                  <span key={c.id} className="px-1.5 py-0.5 rounded"
+                    style={{
+                      color: c.id === commitment.id ? GOLD : TEXT_DIM,
+                      border: `1px solid ${c.id === commitment.id ? GOLD + '44' : BORDER}`,
+                    }}>
+                    {c.asOfDate || '—'} · called {fmtCurrency(c.called || 0)}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
               <NumField label="Commitment" value={committed} onSave={v => updateCommitment({ committed: v })} />
               <NumField label="Called" value={called} onSave={v => updateCommitment({ called: v })} />
