@@ -5,14 +5,30 @@ GitHub repo settings or Vercel project config without the owner's
 account access. Track these here so the same item doesn't get rediscovered
 across sprints.
 
-## 1. Branch protection on `main`
+## 1. Branch protection on `main` — deliberately OFF
+
+**Current policy: `main` is unprotected and work is committed straight to it.**
+No feature branches, no pull requests. This is a deliberate choice for a
+solo-maintainer repo — the PR round-trip was pure overhead.
+
+CI (`.github/workflows/ci.yml`) runs lint + test + build on every push to
+`main`, so a broken commit still surfaces; it just isn't blocked beforehand.
+The safety net is running `npm run lint && npm test && npx vite build`
+locally *before* pushing. That check is not optional.
+
+If the repo ever gains a second regular contributor, revisit this — the
+settings that were originally planned are kept below for that day.
+
+<details>
+<summary>Branch protection settings, if this is ever turned back on</summary>
 
 GitHub → repo Settings → Branches → **Add branch protection rule** (or
 **Add classic rule** depending on the org plan).
 
 - **Branch name pattern**: `main`
 - **Require a pull request before merging**: on
-  - **Require approvals**: 1
+  - **Require approvals**: 1 — note a solo maintainer cannot approve their
+    own PR, which would hard-block all merges
   - **Dismiss stale pull request approvals when new commits are pushed**: on
 - **Require status checks to pass before merging**: on
   - Required check: `build` (the job in `.github/workflows/ci.yml`)
@@ -21,8 +37,7 @@ GitHub → repo Settings → Branches → **Add branch protection rule** (or
 - **Do not allow bypassing the above settings**: on, except for repo admins
   if you want emergency-fix latitude
 
-The CI workflow runs lint + test + build. Once status checks are required,
-a red CI run blocks merge automatically.
+</details>
 
 ## 2. Vercel environment variables
 
