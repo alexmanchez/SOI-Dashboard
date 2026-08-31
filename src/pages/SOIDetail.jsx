@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 
 import {
-  PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT_2, RED, GOLD,
+  BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, RED, GOLD,
 } from '../lib/theme';
 import {
   fmtCurrency, fmtPct, fmtMoic, fundLabel, uid,
@@ -159,6 +159,43 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
         snapshots: snapshotsOf(x)
           .map(sn => sn.id !== snapId ? sn : { ...sn, asOfDate: nextDate })
           .sort((a, b) => ((a.asOfDate || '') < (b.asOfDate || '') ? -1 : 1)),
+      }),
+    }));
+  };
+
+  /* Sub-commitments live on the FoF snapshot and are what makes look-through
+     possible: computeRollup reads them to attribute a slice of each underlying
+     fund's positions to the FoF. Until now they could only arrive via seed
+     data, so a fund-of-funds built from scratch could never look through. */
+  const addSubCommitment = ({ toSoiId, committed, called, distributions }) => {
+    if (!toSoiId) return;
+    updateStore(s => ({
+      ...s,
+      soIs: s.soIs.map(x => x.id !== soiId ? x : {
+        ...x,
+        snapshots: snapshotsOf(x).map(sn => sn.id !== selectedSnapId ? sn : {
+          ...sn,
+          subCommitments: [...(sn.subCommitments || []), {
+            id: uid(),
+            toSoiId,
+            committed: Number(committed) || 0,
+            called: Number(called) || 0,
+            distributions: Number(distributions) || 0,
+          }],
+        }),
+      }),
+    }));
+  };
+
+  const deleteSubCommitment = (subId) => {
+    updateStore(s => ({
+      ...s,
+      soIs: s.soIs.map(x => x.id !== soiId ? x : {
+        ...x,
+        snapshots: snapshotsOf(x).map(sn => sn.id !== selectedSnapId ? sn : {
+          ...sn,
+          subCommitments: (sn.subCommitments || []).filter(sub => sub.id !== subId),
+        }),
       }),
     }));
   };
@@ -510,6 +547,15 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
             <div className="text-xs uppercase tracking-wider mb-3" style={{color:TEXT_MUTE}}>
               Underlying Manager Commitments ({subCommitments.length})
             </div>
+            {/* Only direct funds are offered: computeRollup explicitly refuses to
+                look through a nested fund-of-funds, and this fund's own vintages
+                would be circular. */}
+            <SubCommitmentForm
+              store={store}
+              excludeSoiId={soi.id}
+              existing={subCommitments}
+              onAdd={addSubCommitment}
+            />
             {subCommitments.length === 0 ? (
               <div className="text-sm" style={{color:TEXT_DIM}}>No sub-commitments in this snapshot.</div>
             ) : (
@@ -523,6 +569,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
                       <th className="text-right px-3 py-2">Distributions</th>
                       <th className="text-right px-3 py-2">Underlying NAV</th>
                       <th className="text-right px-3 py-2">FoF Share %</th>
+                      <th />
                     </tr>
                   </thead>
                   <tbody>
@@ -547,6 +594,13 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
                           <td className="px-3 py-2.5 text-right tabular-nums">{underlyingMV > 0 ? fmtCurrency(underlyingMV) : '—'}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums">
                             {fofSharePct != null ? <span style={{color: ACCENT_2}}>{fmtPct(fofSharePct, 2)}</span> : '—'}
+                          </td>
+                          <td className="px-2 py-2.5 text-right">
+                            <button onClick={() => deleteSubCommitment(sub.id)}
+                              title="Remove this sub-commitment"
+                              style={{color: RED}}>
+                              <Trash2 size={12}/>
+                            </button>
                           </td>
                         </tr>
                       );
@@ -632,3 +686,110 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
   );
 }
 
+
+/* Inline "add sub-commitment" form for a fund-of-funds snapshot.
+
+   A FoF's exposure is its slice of the underlying funds, so look-through needs
+   the committed/called figures per underlying fund. Only direct funds are
+   selectable: computeRollup refuses to recurse through a nested FoF, and the
+   FoF's own vintages would be circular. */
+export function SubCommitmentForm({ store, excludeSoiId, existing, onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [toSoiId, setToSoiId] = useState('');
+  const [committed, setCommitted] = useState('');
+  const [called, setCalled] = useState('');
+  const [distributions, setDistributions] = useState('');
+
+  const managerById = useMemo(
+    () => Object.fromEntries(store.managers.map((m) => [m.id, m])),
+    [store.managers]
+  );
+  const alreadyLinked = new Set((existing || []).map((s) => s.toSoiId));
+  const candidates = store.soIs.filter(
+    (x) =>
+      x.id !== excludeSoiId &&
+      managerById[x.managerId]?.type !== 'fund_of_funds' &&
+      !alreadyLinked.has(x.id)
+  );
+
+  const reset = () => {
+    setToSoiId(''); setCommitted(''); setCalled(''); setDistributions('');
+    setOpen(false);
+  };
+
+  const save = () => {
+    if (!toSoiId) return;
+    onAdd({ toSoiId, committed, called, distributions });
+    reset();
+  };
+
+  if (!open) {
+    const disabled = candidates.length === 0;
+    return (
+      <button onClick={() => setOpen(true)} disabled={disabled}
+        title={disabled ? 'No eligible direct funds to link — add one first.' : ''}
+        className="mb-3 text-xs px-2 py-1 rounded flex items-center gap-1"
+        style={{
+          color: disabled ? TEXT_MUTE : ACCENT_2,
+          border: `1px solid ${disabled ? BORDER : ACCENT_2 + '44'}`,
+          opacity: disabled ? 0.5 : 1,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+        }}>
+        <Plus size={10}/> Add sub-commitment
+      </button>
+    );
+  }
+
+  return (
+    <div className="mb-3 p-3 rounded space-y-2"
+      style={{ backgroundColor: PANEL_2, border: `1px solid ${ACCENT_2}44` }}>
+      <div>
+        <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{color: TEXT_MUTE}}>
+          Underlying fund
+        </label>
+        <select value={toSoiId} onChange={(e) => setToSoiId(e.target.value)}
+          className="w-full text-xs rounded px-2 py-1 outline-none"
+          style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}>
+          <option value="">— pick —</option>
+          {candidates.map((x) => (
+            <option key={x.id} value={x.id}>
+              {managerById[x.managerId]?.name || 'Unknown'} — {fundLabel(x)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{color: TEXT_MUTE}}>Committed ($)</label>
+          <input type="number" value={committed} onChange={(e) => setCommitted(e.target.value)} placeholder="0"
+            className="w-full text-xs rounded px-2 py-1 outline-none tabular-nums"
+            style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }} />
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{color: TEXT_MUTE}}>Called ($)</label>
+          <input type="number" value={called} onChange={(e) => setCalled(e.target.value)} placeholder="0"
+            className="w-full text-xs rounded px-2 py-1 outline-none tabular-nums"
+            style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }} />
+          <div className="text-[10px] mt-0.5" style={{color: TEXT_MUTE}}>Drives the look-through share.</div>
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{color: TEXT_MUTE}}>Distributions ($)</label>
+          <input type="number" value={distributions} onChange={(e) => setDistributions(e.target.value)} placeholder="0"
+            className="w-full text-xs rounded px-2 py-1 outline-none tabular-nums"
+            style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }} />
+        </div>
+      </div>
+      <div className="flex gap-1 justify-end">
+        <button onClick={save} disabled={!toSoiId}
+          className="px-2 py-1 rounded text-xs font-medium"
+          style={{ backgroundColor: toSoiId ? ACCENT : PANEL, color: toSoiId ? BG : TEXT_MUTE, opacity: toSoiId ? 1 : 0.5 }}>
+          Add
+        </button>
+        <button onClick={reset} className="px-2 py-1 rounded text-xs"
+          style={{ color: TEXT_DIM, border: `1px solid ${BORDER}` }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}

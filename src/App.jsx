@@ -21,7 +21,7 @@ import {
 } from './lib/storage';
 import { seedStore } from './lib/seed';
 import {
-  latestSnapshot, distinctSnapshotDates,
+  latestSnapshot, distinctSnapshotDates, snapshotsOf,
 } from './lib/snapshots';
 import { computeSearchResults } from './lib/search';
 import {
@@ -382,7 +382,16 @@ export default function App() {
         // Every snapshot gets a $0 cash bucket backfilled on load, so positionCount
         // alone can't distinguish "real holdings" from "an empty fund". Onboarding
         // is only finished once a non-cash position exists.
-        const realPositionCount = rollup.positions.filter((p) => !p.isCashBucket).length;
+        // Onboarding is a property of the whole store, not the current scope.
+        // Scoping it meant the checklist reappeared on a fully populated book
+        // whenever the selection happened to hold no direct positions — e.g. a
+        // fund-of-funds manager, whose exposure lives in its sub-commitments.
+        // ScopeHeader already covers the "nothing in this selection" case.
+        const storeHasRealPositions = store.soIs.some((soi) =>
+          snapshotsOf(soi).some((snap) =>
+            (snap.positions || []).some((p) => !p.isCashBucket)
+          )
+        );
         // A commitment carries committed / called / MOIC figures worth rendering
         // even before any positions have been entered against it.
         const scopedSoiIds = new Set(rollup.soIs.map((s) => s.id));
@@ -549,7 +558,7 @@ export default function App() {
                   </div>
                 )}
                 {hasContent && ContentForOverview}
-                {realPositionCount === 0 && (
+                {!storeHasRealPositions && (
                   <EmptyStateWelcome store={store} onOpenSettings={() => setSettingsOpen(true)} onImport={() => setImportOpen(true)} />
                 )}
               </div>
@@ -571,7 +580,7 @@ export default function App() {
                 priceHistory={priceHistory} range={range} apiKey={effectiveApiKey}
                 clientShareMode={clientShareMode} scaleBy={scaleBy} />
             )}
-            {realPositionCount === 0 && (
+            {!storeHasRealPositions && (
               <EmptyStateWelcome store={store} onOpenSettings={() => setSettingsOpen(true)} onImport={() => setImportOpen(true)} />
             )}
           </div>

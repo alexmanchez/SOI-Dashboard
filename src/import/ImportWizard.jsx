@@ -12,7 +12,7 @@ import {
   BG, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, RED, GOLD,
 } from '../lib/theme';
 import {
-  fmtCurrency, uid, today,
+  fmtCurrency, uid, today, fundLabel,
 } from '../lib/format';
 import {
   DEFAULT_TOKEN_SECTOR, UNCLASSIFIED, getSectors,
@@ -411,7 +411,7 @@ export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarge
                       <option value="">— select —</option>
                       {existingSois.map(s => (
                         <option key={s.id} value={s.id}>
-                          {s.vintage} — {snapshotsOf(s).length} snapshot(s), latest {latestSnapshot(s)?.asOfDate || 'no date'}
+                          {fundLabel(s)} — {snapshotsOf(s).length} snapshot(s), latest {latestSnapshot(s)?.asOfDate || 'no date'}
                         </option>
                       ))}
                     </select>
