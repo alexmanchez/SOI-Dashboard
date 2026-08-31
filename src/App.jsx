@@ -17,7 +17,7 @@ import {
   DEFAULT_SECTORS, setSectors,
 } from './lib/sectors';
 import {
-  loadStore, saveStore,
+  loadStore, saveStore, emptyStore,
 } from './lib/storage';
 import { seedStore } from './lib/seed';
 import {
@@ -70,7 +70,9 @@ export default function App() {
   const [store, setStore] = useState(() => {
     const loaded = loadStore();
     if (loaded && (loaded.soIs.length || loaded.clients.length)) return loaded;
-    return seedStore();
+    // Start empty — user creates client / manager / commitments themselves via Settings.
+    // ("Load demo portfolio" button in Settings still exposes seedStore for testing.)
+    return emptyStore();
   });
   // Sync lib/sectors module-level ref to the live store list. If stored
   // sectors lack the v5 'base-layer' bucket (e.g. HMR preserved an older
@@ -92,7 +94,7 @@ export default function App() {
   // Top-level navigation: selection + tab
   const [selection, setSelection] = useState(() => {
     // Start scoped to the first client if one exists (most useful default)
-    const loaded = loadStore() || seedStore();
+    const loaded = loadStore() || emptyStore();
     if (loaded.clients.length === 1) return { kind: 'client', id: loaded.clients[0].id };
     if (loaded.clients.length > 1)   return { kind: 'firm' };
     return { kind: 'firm' };
@@ -384,7 +386,16 @@ export default function App() {
         // grid" landing. That grid keeps its full-width layout because it's a
         // directory, not a detail page.
         const isManagersGrid = tab === 'managers' && !drilldownSoi && selection.kind !== 'manager' && selection.kind !== 'vintage';
-        const useSidebarLayout = !isManagersGrid && rollup.positionCount > 0;
+        // Every snapshot gets a $0 cash bucket backfilled on load, so positionCount
+        // alone can't distinguish "real holdings" from "an empty fund". Onboarding
+        // is only finished once a non-cash position exists.
+        const realPositionCount = rollup.positions.filter((p) => !p.isCashBucket).length;
+        // A commitment carries committed / called / MOIC figures worth rendering
+        // even before any positions have been entered against it.
+        const scopedSoiIds = new Set(rollup.soIs.map((s) => s.id));
+        const hasContent = rollup.positionCount > 0
+          || store.commitments.some((c) => scopedSoiIds.has(c.soiId));
+        const useSidebarLayout = !isManagersGrid && hasContent;
         const onManagerOrVintage = selection.kind === 'manager' || selection.kind === 'vintage' || !!drilldownSoi;
         const HeaderBlock = (
           <ScopeHeader
@@ -544,7 +555,10 @@ export default function App() {
                     <TimeSlider dates={snapshotDates} value={asOfDate} onChange={setAsOfDate} />
                   </div>
                 )}
-                {rollup.positionCount > 0 && ContentForOverview}
+                {hasContent && ContentForOverview}
+                {realPositionCount === 0 && (
+                  <EmptyStateWelcome store={store} onOpenSettings={() => setSettingsOpen(true)} onImport={() => setImportOpen(true)} />
+                )}
               </div>
             </div>
           );
@@ -559,10 +573,13 @@ export default function App() {
                 <TimeSlider dates={snapshotDates} value={asOfDate} onChange={setAsOfDate} />
               </div>
             )}
-            {rollup.positionCount > 0 && (
+            {hasContent && (
               <ManagersTab rollup={rollup} store={store} onDrill={(soiId) => setDrilldownSoi(soiId)}
                 priceHistory={priceHistory} range={range} apiKey={effectiveApiKey}
                 clientShareMode={clientShareMode} scaleBy={scaleBy} />
+            )}
+            {realPositionCount === 0 && (
+              <EmptyStateWelcome store={store} onOpenSettings={() => setSettingsOpen(true)} onImport={() => setImportOpen(true)} />
             )}
           </div>
         );
@@ -635,4 +652,77 @@ export default function App() {
    IMPORT WIZARD — file upload → map cols → assign to manager/client → save
    Also supports manual entry from scratch.
    ============================================================================= */
+
+
+/* Welcome / onboarding panel shown when the store has no positions. Guides
+   the user through creating their first client / manager / commitment via
+   Settings, or importing an existing SOI. Progressive copy: if they have
+   partial data, tell them what's next. */
+function EmptyStateWelcome({ store, onOpenSettings, onImport }) {
+  const hasClients = store.clients.length > 0;
+  const hasManagers = store.managers.length > 0;
+  const hasSoIs = store.soIs.length > 0;
+
+  const steps = [
+    { label: 'Add a client', done: hasClients, hint: 'Family office, fund, or entity you invest through.' },
+    { label: 'Add a manager', done: hasManagers, hint: 'The GP / fund manager (HackVC, Framework, etc.).' },
+    { label: 'Link them via a fund + commitment', done: hasSoIs, hint: 'Fund vintage, committed capital, called-to-date.' },
+    { label: 'Add positions', done: false, hint: 'Import an SOI file, or add tokens manually via the snapshot editor.' },
+  ];
+
+  return (
+    <div style={{ padding: '48px 24px', maxWidth: 720, margin: '0 auto' }}>
+      <div className="text-2xl font-bold mb-2" style={{ color: TEXT }}>
+        Welcome to Catena.
+      </div>
+      <div className="text-sm mb-8" style={{ color: TEXT_DIM }}>
+        Get started by setting up your first client, manager, and fund commitment.
+        Everything lives in your browser — no server, no accounts.
+      </div>
+
+      <div className="space-y-2 mb-8">
+        {steps.map((s, i) => (
+          <div key={i} className="flex items-start gap-3 p-3 rounded"
+            style={{
+              backgroundColor: s.done ? '#0d3d2b' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${s.done ? '#3ecf8e44' : BORDER}`,
+            }}>
+            <div style={{
+              width: 20, height: 20, borderRadius: 10, flexShrink: 0,
+              backgroundColor: s.done ? '#3ecf8e' : 'transparent',
+              border: `1.5px solid ${s.done ? '#3ecf8e' : TEXT_MUTE}`,
+              color: '#000', fontSize: 11, fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              {s.done ? '✓' : i + 1}
+            </div>
+            <div>
+              <div className="text-sm" style={{ color: s.done ? TEXT_DIM : TEXT, textDecoration: s.done ? 'line-through' : 'none' }}>
+                {s.label}
+              </div>
+              <div className="text-xs mt-0.5" style={{ color: TEXT_MUTE }}>{s.hint}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-2 flex-wrap">
+        <button onClick={onOpenSettings}
+          className="px-4 py-2 rounded text-sm font-medium"
+          style={{ backgroundColor: '#3ecf8e', color: '#000' }}>
+          Open Settings to add {!hasClients ? 'a client' : !hasManagers ? 'a manager' : !hasSoIs ? 'a fund + commitment' : 'more'}
+        </button>
+        <button onClick={onImport}
+          className="px-4 py-2 rounded text-sm"
+          style={{ color: TEXT, border: `1px solid ${BORDER}`, backgroundColor: PANEL }}>
+          Or import an SOI (Excel)
+        </button>
+      </div>
+
+      <div className="text-[11px] mt-6" style={{ color: TEXT_MUTE }}>
+        Want to explore first? Open Settings → Danger zone → "Reset to seed data" to load a 4-vintage demo portfolio you can poke at.
+      </div>
+    </div>
+  );
+}
 
