@@ -488,7 +488,7 @@ export default function App() {
               />
             )}
             {subPage === 'fund-economics' && !drilldownSoi && !onManagerOrVintage && (
-              <FundEconomicsPage rollup={rollup} store={store} selection={selection} clientShareMode={clientShareMode} />
+              <FundEconomicsPage rollup={rollup} store={store} selection={selection} clientShareMode={clientShareMode} asOfDate={asOfDate} />
             )}
             {subPage === 'fund-economics' && !drilldownSoi && onManagerOrVintage && (
               <PlaceholderPage icon={DollarSign}

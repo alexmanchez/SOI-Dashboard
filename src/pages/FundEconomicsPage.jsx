@@ -12,11 +12,26 @@ import {
 import {
   Panel, KPI,
 } from '../components/ui';
+import { commitmentAsOf } from '../lib/commitments';
 
-export function FundEconomicsPage({ rollup, store, selection, clientShareMode }) {
+export function FundEconomicsPage({ rollup, store, selection, clientShareMode, asOfDate }) {
   const commits = useMemo(() => {
     let cc = store.commitments;
     if (selection.kind === 'client') cc = cc.filter(c => c.clientId === selection.id);
+    /* Commitments are dated rows: one per statement period, per client per
+       fund. Only the row in force belongs in this table — listing every row
+       double-counts a fund's commitment once it has more than one period, so
+       a single $10M fund with a year-end and a Q1 row reported $20M committed. */
+    const scoped = cc;
+    cc = _.uniqBy(
+      scoped.map((c) => {
+        const sameLine = scoped.filter(
+          (x) => x.soiId === c.soiId && x.clientId === c.clientId
+        );
+        return commitmentAsOf(sameLine, c.soiId, asOfDate) || c;
+      }),
+      (c) => c.id
+    );
     // Decorate with current NAV from rollup.managerBreakdown where possible.
     const navBySoi = {};
     for (const m of (rollup.managerBreakdown || [])) navBySoi[m.soiId] = m.value;
@@ -42,7 +57,7 @@ export function FundEconomicsPage({ rollup, store, selection, clientShareMode })
         tvpi: called > 0 ? (nav + distributions) / called : null,
       };
     });
-  }, [store.commitments, store.clients, store.managers, store.soIs, rollup.managerBreakdown, selection]);
+  }, [store.commitments, store.clients, store.managers, store.soIs, rollup.managerBreakdown, selection, asOfDate]);
 
   const totals = useMemo(() => commits.reduce((t, c) => ({
     committed: t.committed + c.committed,

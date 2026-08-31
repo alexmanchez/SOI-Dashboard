@@ -67,10 +67,15 @@ export const fetchCoinChart = async (cgTokenId, days, apiKey) => {
   }
 };
 
+const MAX_RETRIES_PER_TOKEN = 3;
+
 export const fetchHistory = async (tokenIds, days, apiKey, onProgress) => {
   const ids = _.uniq(tokenIds).filter(Boolean);
   if (!ids.length) return { history: {}, error: null };
   const out = {};
+  const retries = {};
+  const failed = [];
+  let throttled = false;
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i];
     try {
@@ -78,12 +83,22 @@ export const fetchHistory = async (tokenIds, days, apiKey, onProgress) => {
       const res = await fetch(withKey(url, apiKey));
       if (res.status === 401 || res.status === 403) return { history: out, error: 'Invalid API key.' };
       if (res.status === 429) {
-        await new Promise((r) => setTimeout(r, 5000));
-        i--;
+        // Back off and retry, but bounded — `i--` with no cap spins forever
+        // against a sustained rate limit, and the keyless tier throttles hard.
+        retries[id] = (retries[id] || 0) + 1;
+        if (retries[id] <= MAX_RETRIES_PER_TOKEN) {
+          await new Promise((r) => setTimeout(r, 5000));
+          i--;
+          continue;
+        }
+        throttled = true;
+        onProgress?.(i + 1, ids.length, id, 'rate limited');
+        failed.push(id);
         continue;
       }
       if (!res.ok) {
         onProgress?.(i + 1, ids.length, id, `HTTP ${res.status}`);
+        failed.push(id);
         continue;
       }
       const data = await res.json();
@@ -95,9 +110,24 @@ export const fetchHistory = async (tokenIds, days, apiKey, onProgress) => {
       out[id] = byDay;
       onProgress?.(i + 1, ids.length, id, null);
     } catch (_e) {
+      // A throttled CoinGecko response omits CORS headers, so the browser
+      // rejects the fetch outright and it lands here rather than as a 429.
+      // Reporting that as a bare network error sends people chasing their
+      // connection when the real cause is the rate limit.
+      throttled = true;
+      failed.push(id);
       onProgress?.(i + 1, ids.length, id, 'network');
     }
     await new Promise((r) => setTimeout(r, 2100));
+  }
+  if (failed.length) {
+    const scope = failed.length === ids.length ? 'No' : 'Some';
+    const cause = throttled
+      ? (apiKey
+        ? 'CoinGecko rate limit reached — wait a minute and refresh.'
+        : 'The keyless CoinGecko tier rate-limited the request. Add a free Demo API key in Settings for reliable history.')
+      : 'CoinGecko did not return data for every token.';
+    return { history: out, error: `${scope} price history loaded for ${failed.length} of ${ids.length} token(s). ${cause}` };
   }
   return { history: out, error: null };
 };
