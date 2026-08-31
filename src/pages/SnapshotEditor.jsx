@@ -322,7 +322,7 @@ export function SnapshotEditor({ store, soiId, updateStore, onClose, apiKey }) {
                         ? (Number(p.txn.amount) || 0) * (Number(p.soiPrice) || 0)
                         : Number(p.txn.amount) || 0
                   ) : 0;
-                  const txnAmt = p.txn ? (p.txn.type === 'S' ? -dollarAmt : dollarAmt) : 0;
+                  const txnAmt = p.txn ? (p.txn.type === 'S' ? -dollarAmt : dollarAmt) : 0; // 'R' carries its own sign
                   const newNAV = positionNewNAV(p);
                   const newPct = newTotal > 0 ? (newNAV / newTotal) * 100 : 0;
                   const sec = sectorOf(p.sectorId);
@@ -498,7 +498,7 @@ function ChangeEditor({ txn, priorNAV, soiPrice, onChange }) {
   const mode = txn?.mode || '$';
   const qtyEnabled = Number(soiPrice) > 0;
 
-  const tagColor = (t) => (t === 'S' ? RED : t === 'B' ? GREEN : ACCENT);
+  const tagColor = (t) => (t === 'S' ? RED : t === 'B' ? GREEN : t === 'R' ? GOLD : ACCENT);
 
   const commit = (nextTag, nextAmt, nextMode) => {
     if (!nextTag && nextAmt === '') {
@@ -557,7 +557,7 @@ function ChangeEditor({ txn, priorNAV, soiPrice, onChange }) {
 
   return (
     <div className="flex items-center gap-1.5">
-      {['B', 'S', 'C'].map((t) => {
+      {['B', 'S', 'C', 'R'].map((t) => {
         const active = tag === t;
         const c = tagColor(t);
         return (
@@ -571,7 +571,12 @@ function ChangeEditor({ txn, priorNAV, soiPrice, onChange }) {
               border: `1px solid ${active ? c : BORDER}`,
               cursor: 'pointer',
             }}
-            title={t === 'B' ? 'Buy / add' : t === 'S' ? 'Sell' : 'Cashflow allocation'}
+            title={
+              t === 'B' ? 'Buy / add — increases NAV, debits cash'
+              : t === 'S' ? 'Sell — decreases NAV, credits cash'
+              : t === 'C' ? 'Cashflow allocation — deploys cash into this position'
+              : 'Revalue — mark-to-market with no cash movement. Enter a negative amount (or negative %) for a markdown.'
+            }
           >{t}</button>
         );
       })}

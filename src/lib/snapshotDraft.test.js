@@ -12,6 +12,7 @@ import {
   isCashBucket,
   getCashBucket,
   nonCashPositions,
+  positionNewQuantity,
 } from './snapshotDraft.js';
 
 const mkCash = (mv = 0) => ({
@@ -262,5 +263,110 @@ describe('applyTxns with a cash bucket', () => {
     const positions = [{ id: 'p1', soiMarketValue: 1000, txn: { type: 'B', amount: 100, mode: '$' } }];
     const out = applyTxns(positions, 50);
     expect(out).toEqual([{ id: 'p1', soiMarketValue: 1100 }]);
+  });
+});
+
+describe("'R' revaluation transactions", () => {
+  const cash = (v) => ({ id: 'cash', isCashBucket: true, positionName: 'Cash', soiMarketValue: v });
+
+  it('moves NAV without touching cash on a markup', () => {
+    const positions = [
+      cash(500_000),
+      { id: 'saft', positionName: 'Aperture Labs SAFT', soiMarketValue: 1_200_000,
+        txn: { type: 'R', amount: 600_000, mode: '$' } },
+    ];
+    // NAV rises by the re-mark...
+    expect(positionNewNAV(positions[1])).toBe(1_800_000);
+    // ...and the cash bucket is untouched: no cash changed hands.
+    expect(residualCash(positions, 0)).toBe(0);
+    const applied = applyTxns(positions, 0);
+    expect(applied.find((p) => p.id === 'saft').soiMarketValue).toBe(1_800_000);
+    expect(applied.find((p) => p.isCashBucket).soiMarketValue).toBe(500_000);
+  });
+
+  it('accepts a negative amount as a markdown', () => {
+    const p = { id: 'x', soiMarketValue: 1_000_000, txn: { type: 'R', amount: -250_000, mode: '$' } };
+    expect(positionNewNAV(p)).toBe(750_000);
+    expect(residualCash([cash(0), p], 0)).toBe(0);
+  });
+
+  it('supports percentage re-marks in both directions', () => {
+    const up = { id: 'u', soiMarketValue: 800_000, txn: { type: 'R', amount: 25, mode: '%' } };
+    const down = { id: 'd', soiMarketValue: 800_000, txn: { type: 'R', amount: -50, mode: '%' } };
+    expect(positionNewNAV(up)).toBe(1_000_000);
+    expect(positionNewNAV(down)).toBe(400_000);
+  });
+
+  it('leaves buy/sell cash behaviour unchanged alongside a revaluation', () => {
+    const positions = [
+      cash(1_000_000),
+      { id: 'b', soiMarketValue: 100_000, txn: { type: 'B', amount: 200_000, mode: '$' } },
+      { id: 's', soiMarketValue: 500_000, txn: { type: 'S', amount: 300_000, mode: '$' } },
+      { id: 'r', soiMarketValue: 400_000, txn: { type: 'R', amount: 900_000, mode: '$' } },
+    ];
+    // Buy debits 200k, sell credits 300k, revaluation contributes nothing.
+    expect(residualCash(positions, 0)).toBe(100_000);
+    const applied = applyTxns(positions, 0);
+    expect(applied.find((p) => p.isCashBucket).soiMarketValue).toBe(1_100_000);
+    expect(applied.find((p) => p.id === 'r').soiMarketValue).toBe(1_300_000);
+  });
+});
+
+describe('quantity roll-forward', () => {
+  const cashRow = { id: 'cash', isCashBucket: true, positionName: 'Cash', soiMarketValue: 1_000_000, quantity: 0 };
+
+  it('reduces token count when a position is sold down', () => {
+    // 60,000 UNI marked at $5.9193; sell the whole position.
+    const uni = {
+      id: 'uni', ticker: 'UNI', quantity: 60_000, soiPrice: 5.9193,
+      soiMarketValue: 355_158, txn: { type: 'S', amount: 100, mode: '%' },
+    };
+    expect(positionNewQuantity(uni)).toBeCloseTo(0, 6);
+    const [, applied] = applyTxns([cashRow, uni], 0);
+    expect(applied.soiMarketValue).toBeCloseTo(0, 6);
+    // The critical part: quantity must go to zero too, or live pricing keeps
+    // valuing 60,000 UNI that the fund no longer holds.
+    expect(applied.quantity).toBeCloseTo(0, 6);
+  });
+
+  it('increases token count on a dollar buy at the snapshot price', () => {
+    const btc = {
+      id: 'btc', ticker: 'BTC', quantity: 30, soiPrice: 88_363.7222,
+      soiMarketValue: 2_650_912, txn: { type: 'B', amount: 1_000_000, mode: '$' },
+    };
+    // $1,000,000 / 88,363.7222 = 11.3169 BTC
+    expect(positionNewQuantity(btc)).toBeCloseTo(30 + 1_000_000 / 88_363.7222, 6);
+  });
+
+  it('treats Qty mode as a literal token delta', () => {
+    const sol = {
+      id: 'sol', quantity: 8_000, soiPrice: 124.8266,
+      soiMarketValue: 998_613, txn: { type: 'B', amount: 2_000, mode: 'Qty' },
+    };
+    expect(positionNewQuantity(sol)).toBe(10_000);
+  });
+
+  it('leaves quantity untouched on a revaluation', () => {
+    // A re-mark is a price move: the fund still holds the same tokens.
+    const btc = {
+      id: 'btc', quantity: 30, soiPrice: 88_363.7222,
+      soiMarketValue: 2_650_912, txn: { type: 'R', amount: -650_912, mode: '$' },
+    };
+    expect(positionNewQuantity(btc)).toBe(30);
+    const [, applied] = applyTxns([cashRow, btc], 0);
+    expect(applied.soiMarketValue).toBe(2_000_000);
+    expect(applied.quantity).toBe(30);
+  });
+
+  it('never drives quantity negative on an oversized sell', () => {
+    const p = { id: 'x', quantity: 100, soiPrice: 10, soiMarketValue: 1_000, txn: { type: 'S', amount: 5_000, mode: '$' } };
+    expect(positionNewQuantity(p)).toBe(0);
+  });
+
+  it('leaves a zero-quantity illiquid position alone', () => {
+    const saft = { id: 'saft', quantity: 0, soiPrice: 0, soiMarketValue: 1_200_000, txn: { type: 'R', amount: 600_000, mode: '$' } };
+    expect(positionNewQuantity(saft)).toBe(0);
+    const [, applied] = applyTxns([cashRow, saft], 0);
+    expect(applied.soiMarketValue).toBe(1_800_000);
   });
 });
