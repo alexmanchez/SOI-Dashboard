@@ -203,9 +203,10 @@ export default function App() {
   }, [store.soIs]);
 
   const effectiveApiKey = resolveApiKey(store.settings.cgApiKey);
+  const useLivePrices = store.settings.useLivePrices;
 
   const refreshPrices = useCallback(async () => {
-    if (!store.settings.useLivePrices) {
+    if (!useLivePrices) {
       setPriceError('Live prices are OFF. Toggle "Live: ON" in the header to enable CoinGecko fetches.');
       return;
     }
@@ -215,12 +216,12 @@ export default function App() {
     if (error) setPriceError(error);
     updateStore(s => ({ ...s, settings: { ...s.settings, lastRefresh: new Date().toISOString() } }));
     setPriceLoading(false);
-  }, [allCgIds, effectiveApiKey, updateStore]);
+  }, [allCgIds, effectiveApiKey, updateStore, useLivePrices]);
 
   // Fetch historical price data for the given scope + days window.
   // Skips tokens we already have sufficient history for.
   const fetchHistoryFor = useCallback(async (tokenIds, daysNeeded) => {
-    if (!store.settings.useLivePrices) return; // silent skip: chart shows existing cached data
+    if (!useLivePrices) return; // silent skip: chart shows existing cached data
     const cappedDays = Math.min(daysNeeded, 365);  // CoinGecko Demo limit
     const ids = _.uniq(tokenIds).filter(Boolean);
     const missing = ids.filter(id => (historyFetched[id] || 0) < cappedDays);
@@ -247,7 +248,7 @@ export default function App() {
     });
     setHistoryLoading(false);
     setHistoryProgress({ current: 0, total: 0, token: '' });
-  }, [effectiveApiKey, historyFetched]);
+  }, [effectiveApiKey, historyFetched, useLivePrices]);
 
   // Pro-rata scale factor per SOI (client called / fund total MV)
   const scaleBy = useMemo(() => {
