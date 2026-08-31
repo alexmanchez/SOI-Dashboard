@@ -114,7 +114,13 @@ export const LeftSidebar = ({
                 {showChildren && (
                   <div>
                     {item.children.map((child) => {
-                      if (hiddenItems.includes(child.id)) return null;
+                      /* Deliberately not filtered by hiddenItems. That list
+                         suppresses top-level entries that make no sense in the
+                         current scope — notably 'fund-economics', which is
+                         client-scoped and meaningless on a manager view. A
+                         fund's own children are always fund-scoped, so reusing
+                         the same list here hid a fund's Economics tab and made
+                         its commitment figures unreachable from the drilldown. */
                       const childActive = subPage === child.id;
                       const ChildIcon = child.icon;
                       return (

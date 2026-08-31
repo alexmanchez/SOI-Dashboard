@@ -10,7 +10,7 @@ import {
   PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT_2, RED, GOLD,
 } from '../lib/theme';
 import {
-  fmtCurrency, fmtPct, fmtMoic, fundLabel, uid, today,
+  fmtCurrency, fmtPct, fmtMoic, fundLabel, uid,
 } from '../lib/format';
 import {
   getSectors, resolveSector,
@@ -36,6 +36,8 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
   const soi = store.soIs.find(s => s.id === soiId);
   const manager = store.managers.find(m => m.id === soi?.managerId);
   const [editingPosition, setEditingPosition] = useState(null); // {mode: 'add'|'edit', position?}
+  // Statement date for a pending "add dated economics row" action.
+  const [newEconDate, setNewEconDate] = useState('');
   const [updatingSOI, setUpdatingSOI] = useState(false);
   const [gridEditMode, setGridEditMode] = useState(false);
 
@@ -410,23 +412,18 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
         /* Record economics for a new period instead of overwriting. Called and
            distributions ratchet over a fund's life, so overwriting the only row
            destroys the prior period's figures and breaks time-travel. */
-        const addDatedUpdate = () => {
-          const nextDate = window.prompt(
-            'Statement date for the new economics row (YYYY-MM-DD):',
-            selectedSnap?.asOfDate || today()
-          );
+        const addDatedUpdate = (nextDate) => {
           if (!nextDate) return;
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) { alert('Please use YYYY-MM-DD.'); return; }
           if (commitRows.some(c => (c.asOfDate || '') === nextDate)) {
             alert(`An economics row dated ${nextDate} already exists for this fund.`);
             return;
           }
-          const row = {
-            ...commitment,
-            id: uid(),
-            asOfDate: nextDate,
-          };
+          // Carry the current figures forward as the starting point — called
+          // and distributions ratchet, so the new period almost always begins
+          // from the prior one rather than from zero.
+          const row = { ...commitment, id: uid(), asOfDate: nextDate };
           updateStore(s => ({ ...s, commitments: [...s.commitments, row] }));
+          setNewEconDate('');
         };
         return (
           <Panel className="p-5">
@@ -439,11 +436,27 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
                   </span>
                 )}
               </div>
-              <button onClick={addDatedUpdate}
-                className="text-xs px-2 py-1 rounded flex items-center gap-1"
-                style={{color:ACCENT_2, border:`1px solid ${ACCENT_2}44`}}>
-                <Plus size={10}/> Add dated update
-              </button>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  value={newEconDate}
+                  onChange={(e) => setNewEconDate(e.target.value)}
+                  title="Statement date for a new economics row"
+                  className="text-xs px-2 py-1 rounded outline-none"
+                  style={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, color: TEXT }}
+                />
+                <button onClick={() => addDatedUpdate(newEconDate)}
+                  disabled={!newEconDate}
+                  className="text-xs px-2 py-1 rounded flex items-center gap-1"
+                  style={{
+                    color: newEconDate ? ACCENT_2 : TEXT_MUTE,
+                    border: `1px solid ${newEconDate ? ACCENT_2 + '44' : BORDER}`,
+                    opacity: newEconDate ? 1 : 0.5,
+                    cursor: newEconDate ? 'pointer' : 'not-allowed',
+                  }}>
+                  <Plus size={10}/> Add dated update
+                </button>
+              </div>
             </div>
             {commitRows.length > 1 && (
               <div className="text-[11px] mb-3 flex flex-wrap gap-1.5" style={{color:TEXT_MUTE}}>
@@ -471,11 +484,15 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
               <Stat label="TVPI" value={fmtMoic(tvpi)} />
             </div>
             {(() => {
-              const fundTotalCalled = _.sumBy(latestSnapshot(soi)?.positions||[], p=>p.soiMarketValue||0);
-              const shareOfFund = fundTotalCalled > 0 ? (called/fundTotalCalled)*100 : null;
+              // Read the snapshot being viewed, not the newest one. Every other
+              // figure in this panel time-travels with the selection, so pinning
+              // these two to the latest snapshot made them disagree with the
+              // fund NAV in the header whenever an earlier period was selected.
+              const fundTotalNAV = _.sumBy(selectedSnap?.positions||[], p=>p.soiMarketValue||0);
+              const shareOfFund = fundTotalNAV > 0 ? (called/fundTotalNAV)*100 : null;
               return (
                 <div className="grid grid-cols-2 gap-2 pt-2 mt-2" style={{borderTop: `1px solid ${BORDER}`}}>
-                  <Stat label="Fund Total NAV" value={fmtCurrency(fundTotalCalled)} />
+                  <Stat label="Fund Total NAV" value={fmtCurrency(fundTotalNAV)} />
                   <Stat label="Your Share of Fund" value={shareOfFund != null ? fmtPct(shareOfFund, 2) : '—'} />
                 </div>
               );
