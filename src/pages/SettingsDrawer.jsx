@@ -161,6 +161,9 @@ export function SettingsDrawer({ store, updateStore, selection, setSelection, on
 
   const wipe = () => {
     updateStore(emptyStore());
+    // Reset scope too — a client/manager selection left pointing at a wiped
+    // record renders as "Unknown client" and matches no commitments.
+    setSelection({ kind: 'firm' });
     onClose();
   };
 
@@ -275,9 +278,10 @@ export function SettingsDrawer({ store, updateStore, selection, setSelection, on
             <div className="text-[11px] mb-1.5 flex items-center gap-1.5" style={{color: TEXT_DIM}}>
               <Users size={11} /> Clients ({store.clients.length})
             </div>
+            <AddClientForm updateStore={updateStore} store={store} setSelection={setSelection} />
             <div className="space-y-1">
               {store.clients.length === 0 && (
-                <div className="text-xs italic px-2 py-1" style={{color: TEXT_MUTE}}>No clients yet. Import an SOI to create one.</div>
+                <div className="text-xs italic px-2 py-1" style={{color: TEXT_MUTE}}>No clients yet. Click "+ Add client" above.</div>
               )}
               {store.clients.map(c => {
                 const count = store.commitments.filter(x => x.clientId === c.id).length;
@@ -301,9 +305,10 @@ export function SettingsDrawer({ store, updateStore, selection, setSelection, on
             <div className="text-[11px] mb-1.5 flex items-center gap-1.5" style={{color: TEXT_DIM}}>
               <Briefcase size={11} /> Managers ({store.managers.length})
             </div>
+            <AddManagerForm updateStore={updateStore} />
             <div className="space-y-1">
               {store.managers.length === 0 && (
-                <div className="text-xs italic px-2 py-1" style={{color: TEXT_MUTE}}>No managers yet.</div>
+                <div className="text-xs italic px-2 py-1" style={{color: TEXT_MUTE}}>No managers yet. Click "+ Add manager" above.</div>
               )}
               {store.managers.map(m => {
                 const soiCount = store.soIs.filter(x => x.managerId === m.id).length;
@@ -346,11 +351,12 @@ export function SettingsDrawer({ store, updateStore, selection, setSelection, on
           {/* SOIs */}
           <div className="mb-4">
             <div className="text-[11px] mb-1.5 flex items-center gap-1.5" style={{color: TEXT_DIM}}>
-              <Building2 size={11} /> SOIs ({store.soIs.length})
+              <Building2 size={11} /> Funds / SOIs ({store.soIs.length})
             </div>
+            <AddCommitmentForm store={store} updateStore={updateStore} />
             <div className="space-y-1">
               {store.soIs.length === 0 && (
-                <div className="text-xs italic px-2 py-1" style={{color: TEXT_MUTE}}>No SOIs yet.</div>
+                <div className="text-xs italic px-2 py-1" style={{color: TEXT_MUTE}}>No funds yet. Click "+ Add fund + commitment" above (needs at least one client and one manager first).</div>
               )}
               {store.soIs.map(x => {
                 const mgr = managerById[x.managerId];
@@ -603,3 +609,264 @@ export function SectorAddForm({ updateStore }) {
   );
 }
 
+
+
+// ===================================================================
+// Add-forms for creating clients / managers / commitments from scratch.
+// Each is a small collapsible form that expands when the user clicks its
+// "+ Add..." button. Committing calls updateStore with an idempotent patch;
+// the form resets and collapses on save.
+// ===================================================================
+
+export function AddClientForm({ updateStore, store, setSelection }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+
+  const save = () => {
+    const n = name.trim();
+    if (!n) return;
+    const id = uid();
+    updateStore((s) => ({ ...s, clients: [...s.clients, { id, name: n, notes: '' }] }));
+    // Scope to the very first client so the committed / called / MOIC KPIs
+    // have somewhere to land as soon as a commitment is added.
+    if (store && store.clients.length === 0 && setSelection) setSelection({ kind: 'client', id });
+    setName('');
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        className="mb-2 text-xs px-2 py-1 rounded flex items-center gap-1"
+        style={{ color: ACCENT_2, border: `1px solid ${ACCENT_2}44` }}>
+        + Add client
+      </button>
+    );
+  }
+
+  return (
+    <div className="mb-2 p-2 rounded space-y-2"
+      style={{ backgroundColor: PANEL_2, border: `1px solid ${ACCENT_2}44` }}>
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Client name (e.g. Acme Family Office)"
+        autoFocus
+        onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setOpen(false); }}
+        className="w-full text-sm rounded px-2 py-1 outline-none"
+        style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}
+      />
+      <div className="flex gap-1 justify-end">
+        <button onClick={save} disabled={!name.trim()}
+          className="px-2 py-1 rounded text-xs font-medium"
+          style={{ backgroundColor: name.trim() ? ACCENT : PANEL, color: name.trim() ? BG : TEXT_MUTE, opacity: name.trim() ? 1 : 0.5 }}>
+          Save
+        </button>
+        <button onClick={() => { setName(''); setOpen(false); }}
+          className="px-2 py-1 rounded text-xs" style={{ color: TEXT_DIM, border: `1px solid ${BORDER}` }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function AddManagerForm({ updateStore }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [firm, setFirm] = useState('');
+  const [type, setType] = useState('direct');
+
+  const save = () => {
+    const n = name.trim();
+    if (!n) return;
+    const id = uid();
+    updateStore((s) => ({ ...s, managers: [...s.managers, { id, name: n, firm: firm.trim(), type }] }));
+    setName(''); setFirm(''); setType('direct');
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        className="mb-2 text-xs px-2 py-1 rounded flex items-center gap-1"
+        style={{ color: ACCENT_2, border: `1px solid ${ACCENT_2}44` }}>
+        + Add manager
+      </button>
+    );
+  }
+
+  return (
+    <div className="mb-2 p-2 rounded space-y-2"
+      style={{ backgroundColor: PANEL_2, border: `1px solid ${ACCENT_2}44` }}>
+      <input
+        type="text" value={name} onChange={(e) => setName(e.target.value)}
+        placeholder="Manager name (e.g. HackVC)"
+        autoFocus
+        className="w-full text-sm rounded px-2 py-1 outline-none"
+        style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}
+      />
+      <input
+        type="text" value={firm} onChange={(e) => setFirm(e.target.value)}
+        placeholder="Firm (optional)"
+        className="w-full text-sm rounded px-2 py-1 outline-none"
+        style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}
+      />
+      <div className="flex items-center gap-2">
+        <label className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Type:</label>
+        <select value={type} onChange={(e) => setType(e.target.value)}
+          className="text-xs rounded px-2 py-1 outline-none"
+          style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}>
+          <option value="direct">Direct</option>
+          <option value="fund_of_funds">Fund-of-Funds</option>
+        </select>
+      </div>
+      <div className="flex gap-1 justify-end">
+        <button onClick={save} disabled={!name.trim()}
+          className="px-2 py-1 rounded text-xs font-medium"
+          style={{ backgroundColor: name.trim() ? ACCENT : PANEL, color: name.trim() ? BG : TEXT_MUTE, opacity: name.trim() ? 1 : 0.5 }}>
+          Save
+        </button>
+        <button onClick={() => { setName(''); setFirm(''); setType('direct'); setOpen(false); }}
+          className="px-2 py-1 rounded text-xs" style={{ color: TEXT_DIM, border: `1px solid ${BORDER}` }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function AddCommitmentForm({ store, updateStore }) {
+  const [open, setOpen] = useState(false);
+  const [clientId, setClientId] = useState('');
+  const [managerId, setManagerId] = useState('');
+  const [vintage, setVintage] = useState('');
+  const [committed, setCommitted] = useState('');
+  const [called, setCalled] = useState('');
+  const [distributions, setDistributions] = useState('');
+
+  const canSave = clientId && managerId && vintage.trim();
+  const disabledReason = store.clients.length === 0
+    ? 'Add a client first.'
+    : store.managers.length === 0
+    ? 'Add a manager first.'
+    : null;
+
+  const save = () => {
+    if (!canSave) return;
+    const soiId = uid();
+    const commitmentId = uid();
+    const asOfDate = new Date().toISOString().slice(0, 10);
+    const newSoi = {
+      id: soiId,
+      managerId,
+      vintage: vintage.trim(),
+      snapshots: [{
+        id: soiId + '_snap',
+        asOfDate,
+        notes: '',
+        positions: [],
+        subCommitments: [],
+        status: 'finalized',
+      }],
+    };
+    const newCommitment = {
+      id: commitmentId,
+      clientId,
+      managerId,
+      soiId,
+      committed: Number(committed) || 0,
+      called: Number(called) || 0,
+      distributions: Number(distributions) || 0,
+      asOfDate,
+    };
+    updateStore((s) => ({
+      ...s,
+      soIs: [...s.soIs, newSoi],
+      commitments: [...s.commitments, newCommitment],
+    }));
+    setClientId(''); setManagerId(''); setVintage('');
+    setCommitted(''); setCalled(''); setDistributions('');
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} disabled={!!disabledReason}
+        title={disabledReason || ''}
+        className="mb-2 text-xs px-2 py-1 rounded flex items-center gap-1"
+        style={{
+          color: disabledReason ? TEXT_MUTE : ACCENT_2,
+          border: `1px solid ${disabledReason ? BORDER : ACCENT_2 + '44'}`,
+          opacity: disabledReason ? 0.5 : 1,
+          cursor: disabledReason ? 'not-allowed' : 'pointer',
+        }}>
+        + Add fund + commitment
+      </button>
+    );
+  }
+
+  return (
+    <div className="mb-2 p-2 rounded space-y-2"
+      style={{ backgroundColor: PANEL_2, border: `1px solid ${ACCENT_2}44` }}>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{ color: TEXT_MUTE }}>Client</label>
+          <select value={clientId} onChange={(e) => setClientId(e.target.value)}
+            className="w-full text-xs rounded px-2 py-1 outline-none"
+            style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}>
+            <option value="">— pick —</option>
+            {store.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{ color: TEXT_MUTE }}>Manager</label>
+          <select value={managerId} onChange={(e) => setManagerId(e.target.value)}
+            className="w-full text-xs rounded px-2 py-1 outline-none"
+            style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}>
+            <option value="">— pick —</option>
+            {store.managers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+      </div>
+      <input
+        type="text" value={vintage} onChange={(e) => setVintage(e.target.value)}
+        placeholder="Fund / vintage label (e.g. Fund III, 2024 Vintage)"
+        className="w-full text-sm rounded px-2 py-1 outline-none"
+        style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }}
+      />
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{ color: TEXT_MUTE }}>Committed ($)</label>
+          <input type="number" value={committed} onChange={(e) => setCommitted(e.target.value)} placeholder="0"
+            className="w-full text-xs rounded px-2 py-1 outline-none tabular-nums"
+            style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }} />
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{ color: TEXT_MUTE }}>Called ($)</label>
+          <input type="number" value={called} onChange={(e) => setCalled(e.target.value)} placeholder="0"
+            className="w-full text-xs rounded px-2 py-1 outline-none tabular-nums"
+            style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }} />
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wider block mb-0.5" style={{ color: TEXT_MUTE }}>Distributions ($)</label>
+          <input type="number" value={distributions} onChange={(e) => setDistributions(e.target.value)} placeholder="0"
+            className="w-full text-xs rounded px-2 py-1 outline-none tabular-nums"
+            style={{ backgroundColor: BG, border: `1px solid ${BORDER}`, color: TEXT }} />
+        </div>
+      </div>
+      <div className="flex gap-1 justify-end">
+        <button onClick={save} disabled={!canSave}
+          className="px-2 py-1 rounded text-xs font-medium"
+          style={{ backgroundColor: canSave ? ACCENT : PANEL, color: canSave ? BG : TEXT_MUTE, opacity: canSave ? 1 : 0.5 }}>
+          Save fund + commitment
+        </button>
+        <button onClick={() => { setOpen(false); }}
+          className="px-2 py-1 rounded text-xs" style={{ color: TEXT_DIM, border: `1px solid ${BORDER}` }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
