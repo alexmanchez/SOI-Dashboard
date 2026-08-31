@@ -596,6 +596,7 @@ export function SOIDetail({ store, soiId, livePrices, onBack, updateStore, price
         <PositionEditor
           mode={editingPosition.mode}
           position={editingPosition.position}
+          apiKey={apiKey}
           onCancel={() => setEditingPosition(null)}
           onSave={savePosition}
         />

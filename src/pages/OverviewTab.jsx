@@ -35,7 +35,7 @@ export function OverviewTab({ rollup, store, selection, priceHistory, historyLoa
     const latest = dates[dates.length - 1];
     // Format to "Sep 30, 2025" style for display.
     const d = new Date(latest + 'T00:00:00Z');
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    return d.toLocaleDateString([], { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
   }, [rollup.managerBreakdown]);
 
   const clientEconomics = useMemo(() => {

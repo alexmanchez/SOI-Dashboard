@@ -204,11 +204,43 @@ export function ImportWizard({ store, updateStore, onClose, onDone, prefillTarge
 
     // ADD SNAPSHOT PATH — add a new snapshot to existing SOI
     if (updateBehavior === 'add_snapshot' && replaceTargetSoiId) {
-      const newSnap = { id: uid(), asOfDate: asOfDate || today(), notes: '', positions };
+      const stamp = asOfDate || today();
+      const targetSoi = store.soIs.find(x => x.id === replaceTargetSoiId);
+      /* Snapshots are keyed by date for time-travel, so two snapshots sharing
+         an asOfDate makes one permanently unreachable. Importing a statement
+         dated the same as an existing snapshot means "these are that
+         statement's holdings" — fill it in rather than shadow it. Newly
+         created funds start with an empty snapshot on the statement date, so
+         this is the normal first-import path, not an edge case. */
+      const collision = snapshotsOf(targetSoi || {}).find(sn => (sn.asOfDate || '') === stamp);
+      if (collision) {
+        const hadPositions = (collision.positions || []).filter(p => !p.isCashBucket).length > 0;
+        if (hadPositions && !window.confirm(
+          `This fund already has a snapshot dated ${stamp} with ${(collision.positions || []).filter(p => !p.isCashBucket).length} position(s).
+
+`
+          + 'Replace those holdings with the ones being imported?'
+        )) { return; }
+        updateStore(s => ({
+          ...s,
+          soIs: s.soIs.map(x => x.id !== replaceTargetSoiId ? x : {
+            ...x,
+            snapshots: snapshotsOf(x).map(sn => sn.id !== collision.id ? sn : {
+              ...sn,
+              // Keep the existing cash bucket; swap in the imported holdings.
+              positions: [...(sn.positions || []).filter(p => p.isCashBucket), ...positions],
+            }),
+          }),
+        }));
+        onDone(); return;
+      }
+      const newSnap = { id: uid(), asOfDate: stamp, notes: '', positions };
       updateStore(s => ({
         ...s,
         soIs: s.soIs.map(x => x.id !== replaceTargetSoiId ? x : {
-          ...x, snapshots: [...snapshotsOf(x), newSnap],
+          ...x,
+          snapshots: [...snapshotsOf(x), newSnap]
+            .sort((a, b) => ((a.asOfDate || '') < (b.asOfDate || '') ? -1 : 1)),
         }),
       }));
       onDone(); return;

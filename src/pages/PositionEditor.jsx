@@ -14,8 +14,9 @@ import { parseNum } from '../lib/parsing';
 import {
   Field, TextInput, Select, Modal,
 } from '../components/ui';
+import { TokenSearch } from '../components/TokenSearch';
 
-export function PositionEditor({ mode, position, onCancel, onSave }) {
+export function PositionEditor({ mode, position, onCancel, onSave, apiKey }) {
   const [form, setForm] = useState(() => ({
     id: position?.id || null,
     positionName: position?.positionName || '',
@@ -31,6 +32,10 @@ export function PositionEditor({ mode, position, onCancel, onSave }) {
     cgTokenId: position?.cgTokenId || '',
     notes: position?.notes || '',
   }));
+
+  // Search box text is separate from the saved link: clearing the query
+  // shouldn't silently unlink an already-linked position.
+  const [tokenQuery, setTokenQuery] = useState(position?.positionName || '');
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -109,10 +114,31 @@ export function PositionEditor({ mode, position, onCancel, onSave }) {
               {value: 'illiquid', label: 'Force illiquid'},
             ]} />
           </Field>
-          <Field label="CoinGecko Token ID (for live prices)" full>
-            <TextInput value={form.cgTokenId} onChange={v=>set('cgTokenId', v)} placeholder="e.g., ethereum, hyperliquid, ondo-finance" />
+          <Field label="CoinGecko link (enables live + historical prices)" full>
+            {/* Search rather than a raw slug field — the id has to match
+                CoinGecko exactly, and typing it from memory is the main way
+                positions end up silently unpriced. */}
+            <TokenSearch
+              value={tokenQuery}
+              apiKey={apiKey}
+              placeholder="Search CoinGecko — e.g. bitcoin, chainlink"
+              onChange={setTokenQuery}
+              onSelect={(coin) => {
+                setTokenQuery(coin.name || '');
+                setForm((f) => ({
+                  ...f,
+                  cgTokenId: coin.id || '',
+                  ticker: coin.symbol ? coin.symbol.toUpperCase() : f.ticker,
+                  positionName: f.positionName || coin.name || '',
+                }));
+              }}
+            />
             <div className="text-[10px] mt-1" style={{color:TEXT_MUTE}}>
-              Find this in the URL on coingecko.com (e.g., coingecko.com/en/coins/<strong style={{color:TEXT_DIM}}>ethereum</strong>)
+              {form.cgTokenId
+                ? <>Linked to <strong style={{color:ACCENT}}>{form.cgTokenId}</strong> — prices and history will load.{' '}
+                    <button onClick={()=>{ set('cgTokenId',''); setTokenQuery(''); }}
+                      style={{color:TEXT_DIM, textDecoration:'underline'}}>Unlink</button></>
+                : 'Not linked — this position is held flat at its marked value (correct for SAFTs, equity, and warrants).'}
             </div>
           </Field>
           <Field label="Notes" full>

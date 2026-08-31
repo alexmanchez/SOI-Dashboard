@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { PANEL, BORDER, TEXT, TEXT_DIM, ACCENT } from '../lib/theme';
-import { fetchAllCoins, searchCoins } from '../lib/api/coingecko';
+import { fetchAllCoins, searchCoins, searchCoinsRemote, mergeCoinMatches } from '../lib/api/coingecko';
 
 /* Inline coin-search input. As the user types, hits a 24h-cached
    CoinGecko /coins/list and surfaces up to 8 matches in a dropdown.
@@ -37,7 +37,29 @@ export function TokenSearch({
     if (autoFocus && inputRef.current) inputRef.current.focus();
   }, [autoFocus]);
 
-  const matches = coins ? searchCoins(coins, value, 8) : [];
+  /* Local list gives instant, offline-safe matches; CoinGecko's /search adds
+     market-cap ordering, which is the only thing that reliably breaks ticker
+     collisions ("btc" is shared by hundreds of coins). Remote is debounced and
+     purely additive — if it's slow, rate-limited, or offline, the local list
+     still drives the dropdown. */
+  const [remote, setRemote] = useState([]);
+  const localMatches = coins ? searchCoins(coins, value, 8) : [];
+
+  useEffect(() => {
+    const q = (value || '').trim();
+    let cancelled = false;
+    // All state writes happen inside the debounce callback, never synchronously
+    // in the effect body.
+    const t = setTimeout(async () => {
+      if (cancelled) return;
+      if (q.length < 2) { setRemote([]); return; }
+      const hits = await searchCoinsRemote(q, apiKey);
+      if (!cancelled) setRemote(hits);
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [value, apiKey]);
+
+  const matches = mergeCoinMatches(remote, localMatches, 8);
 
   const pickCoin = (coin) => {
     onSelect({

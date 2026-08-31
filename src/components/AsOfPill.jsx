@@ -17,6 +17,7 @@ export function AsOfPill({ dates, label, onClick }) {
   const isMulti = new Set(ds).size > 1;
   const displayLabel = label || (isMulti ? 'Oldest data' : 'Data as of');
   const pretty = new Date(oldest + 'T00:00:00Z').toLocaleDateString([], {
+    timeZone: 'UTC',
     year: 'numeric',
     month: 'short',
     day: 'numeric',

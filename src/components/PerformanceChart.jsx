@@ -95,7 +95,7 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
               </div>
               {asOfMs && (
                 <div className="text-[10px] px-2 py-0.5 rounded" style={{color: GOLD, backgroundColor: GOLD+'11', border: `1px solid ${GOLD}44`}}>
-                  As of {new Date(asOfMs).toLocaleDateString([], {year:'numeric', month:'short', day:'numeric'})}
+                  As of {new Date(asOfMs).toLocaleDateString([], {timeZone:'UTC', year:'numeric', month:'short', day:'numeric'})}
                 </div>
               )}
             </div>
@@ -157,8 +157,8 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
                 tickFormatter={(ms) => {
                   const d = new Date(ms);
                   if (range === '1D') return d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-                  if (range === 'MTD' || range === 'YTD') return d.toLocaleDateString([], {month: 'short', day: 'numeric'});
-                  return d.toLocaleDateString([], {month: 'short', year: '2-digit'});
+                  if (range === 'MTD' || range === 'YTD') return d.toLocaleDateString([], {timeZone:'UTC', month: 'short', day: 'numeric'});
+                  return d.toLocaleDateString([], {timeZone:'UTC', month: 'short', year: '2-digit'});
                 }}
                 minTickGap={60} />
               <YAxis domain={[yMin, yMax]} tick={{fontSize: 10, fill: TEXT_MUTE}} axisLine={false} tickLine={false}
@@ -167,7 +167,7 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
                 contentStyle={{backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, borderRadius: 6, fontSize: 12}}
                 labelStyle={{color: TEXT_DIM}}
                 itemStyle={{color: TEXT}}
-                labelFormatter={(ms) => new Date(ms).toLocaleDateString([], {year:'numeric', month: 'short', day: 'numeric'})}
+                labelFormatter={(ms) => new Date(ms).toLocaleDateString([], {timeZone:'UTC', year:'numeric', month: 'short', day: 'numeric'})}
                 formatter={(v) => [fmtCurrency(v), 'NAV']} />
               <Area type="monotone" dataKey="value" stroke={lineColor} strokeWidth={1.5}
                 fill={`url(#grad-${positive?'up':'down'})`} />
@@ -188,7 +188,7 @@ export function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoa
               {/* Snapshot date markers */}
               {(snapshotDates||[]).filter(ms => series.length > 0 && ms >= series[0].date && ms <= series[series.length-1].date).map((ms,i) => (
                 <ReferenceLine key={i} x={ms} stroke={GOLD} strokeWidth={1} strokeDasharray="3 3"
-                  label={{ value: new Date(ms).toLocaleDateString([],{month:'short',year:'2-digit'}), position:'top', fill:GOLD, fontSize:9 }} />
+                  label={{ value: new Date(ms).toLocaleDateString([],{timeZone:'UTC',month:'short',year:'2-digit'}), position:'top', fill:GOLD, fontSize:9 }} />
               ))}
               {/* Time-travel slider's selected-date vertical line. */}
               {asOfDate && series.length > 0 && (() => {

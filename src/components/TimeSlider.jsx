@@ -45,6 +45,7 @@ export function TimeSlider({ dates, value, onChange }) {
 
   const prettyDate = (iso) =>
     new Date(iso + 'T00:00:00Z').toLocaleDateString([], {
+      timeZone: 'UTC',
       month: 'short',
       day: 'numeric',
       year: 'numeric',

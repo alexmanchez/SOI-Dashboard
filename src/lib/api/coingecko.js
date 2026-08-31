@@ -154,27 +154,90 @@ export const fetchAllCoins = async (apiKey) => {
   }
 };
 
-/* Lightweight relevance ranking — exact symbol, then symbol prefix, then name
-   prefix, then substring fallback. Capped at `limit` results. Runs through the
-   ~15k list in <5ms in practice; no fuzzy lib needed. */
+/* Lightweight relevance ranking over the ~15k /coins/list payload.
+   Capped at `limit` results; no fuzzy lib needed.
+
+   Bucket order matters more than it looks. The list carries no market-cap
+   data, so there is nothing to rank "importance" by — and thousands of
+   memecoins deliberately squat the names and symbols of major assets. Ranking
+   exact-symbol first surfaced HarryPotterTrumpHomerSimpson777Inu (symbol
+   "ethereum") above Ethereum, and buried Solana entirely behind coins merely
+   containing the word.
+
+   CoinGecko's canonical id is the reliable tie-breaker: the major asset owns
+   the plain id ("bitcoin", "ethereum", "solana"), while squatters get
+   suffixed ids. So exact id wins, then exact name, then exact symbol. */
 export const searchCoins = (coins, query, limit = 8) => {
   if (!Array.isArray(coins) || !query) return [];
   const q = String(query).toLowerCase().trim();
   if (!q) return [];
-  const exact = [];
+  const idExact = [];
+  const nameExact = [];
+  const symbolExact = [];
   const symbolPrefix = [];
   const namePrefix = [];
   const contains = [];
+  const buckets = [idExact, nameExact, symbolExact, symbolPrefix, namePrefix, contains];
+  const collected = () => buckets.reduce((n, b) => n + b.length, 0);
   for (const c of coins) {
     const sym = (c.symbol || '').toLowerCase();
     const name = (c.name || '').toLowerCase();
     const id = (c.id || '').toLowerCase();
-    if (sym === q) exact.push(c);
+    if (id === q) idExact.push(c);
+    else if (name === q) nameExact.push(c);
+    else if (sym === q) symbolExact.push(c);
     else if (sym.startsWith(q)) symbolPrefix.push(c);
     else if (name.startsWith(q)) namePrefix.push(c);
     else if (sym.includes(q) || name.includes(q) || id.includes(q)) contains.push(c);
-    if (exact.length + symbolPrefix.length + namePrefix.length + contains.length >= limit * 4) break;
+    // Keep scanning past the cap while the top buckets are still empty — the
+    // canonical asset's id often sorts late alphabetically, and bailing early
+    // is exactly how Solana went missing.
+    if (collected() >= limit * 4 && (idExact.length || nameExact.length)) break;
+    if (collected() >= limit * 40) break;
   }
-  return [...exact, ...symbolPrefix, ...namePrefix, ...contains].slice(0, limit);
+  return [...idExact, ...nameExact, ...symbolExact, ...symbolPrefix, ...namePrefix, ...contains]
+    .slice(0, limit);
 };
 
+/* Market-cap-ranked search via CoinGecko's own /search endpoint.
+
+   The cached /coins/list has no market-cap data, so it cannot break ticker
+   collisions — a bare "btc" is shared by hundreds of coins and the canonical
+   one is not distinguishable locally. /search returns results ordered by
+   market_cap_rank, which is exactly the missing signal. Works keyless.
+
+   Returns [] on any failure so the caller can fall back to local results
+   rather than showing the user an error mid-typing. */
+export const searchCoinsRemote = async (query, apiKey) => {
+  const q = String(query || '').trim();
+  if (!q) return [];
+  try {
+    const url = `${CG_BASE}/search?query=${encodeURIComponent(q)}`;
+    const res = await fetch(withKey(url, apiKey));
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.coins || []).map((c) => ({
+      id: c.id,
+      symbol: c.symbol,
+      name: c.name,
+      marketCapRank: c.market_cap_rank ?? null,
+    }));
+  } catch {
+    return [];
+  }
+};
+
+/* Merge market-cap-ranked remote hits ahead of local matches, de-duplicated.
+   Remote ordering wins because it encodes market cap; local fills the tail so
+   the list stays useful when the network is slow, rate-limited, or offline. */
+export const mergeCoinMatches = (remote, local, limit = 8) => {
+  const seen = new Set();
+  const out = [];
+  for (const c of [...(remote || []), ...(local || [])]) {
+    if (!c || !c.id || seen.has(c.id)) continue;
+    seen.add(c.id);
+    out.push(c);
+    if (out.length >= limit) break;
+  }
+  return out;
+};

@@ -11,7 +11,7 @@ import {
   BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, RED, VIOLET,
 } from '../lib/theme';
 import {
-  uid, today,
+  uid, today, fundLabel,
 } from '../lib/format';
 import {
   emptyStore,
@@ -49,8 +49,8 @@ export function SettingsDrawer({ store, updateStore, selection, setSelection, on
     if (selection?.kind === 'vintage' && killedSoiIds.has(selection.id)) setSelection({ kind: 'firm' });
   };
 
-  const renameSOI = (id, vintage) => updateStore(s => ({
-    ...s, soIs: s.soIs.map(x => x.id === id ? { ...x, vintage } : x),
+  const renameSOI = (id, fundName, vintage) => updateStore(s => ({
+    ...s, soIs: s.soIs.map(x => x.id === id ? { ...x, fundName, vintage } : x),
   }));
   const deleteSOI = (id) => {
     updateStore(s => ({
@@ -366,10 +366,13 @@ export function SettingsDrawer({ store, updateStore, selection, setSelection, on
                 return (
                   <ManageRow
                     key={x.id}
-                    title={`${mgr?.name || 'Unknown manager'} — ${x.vintage || '(no vintage)'}`}
+                    title={`${mgr?.name || 'Unknown manager'} — ${fundLabel(x)}`}
                     subtitle={`${snapCount} snapshot${snapCount===1?'':'s'} · ${posCount} positions (latest) · as of ${latestSnapshot(x)?.asOfDate || '—'} · ${commitCount} commitment${commitCount===1?'':'s'}`}
-                    editFields={[{ label: 'Vintage label', value: x.vintage || '', placeholder: 'e.g. Fund III' }]}
-                    onSave={([vintage]) => renameSOI(x.id, vintage)}
+                    editFields={[
+                      { label: 'Fund name', value: x.fundName || '', placeholder: 'e.g. Token Growth Fund II' },
+                      { label: 'Vintage', value: x.vintage || '', placeholder: 'e.g. 2024' },
+                    ]}
+                    onSave={([fundName, vintage]) => renameSOI(x.id, fundName, vintage)}
                     onDelete={() => deleteSOI(x.id)}
                     deleteWarning={commitCount > 0 ? `Also removes ${commitCount} commitment${commitCount===1?'':'s'}` : ''}
                   />

@@ -177,7 +177,7 @@ export function ManagerRoundsPage({ manager, updateStore }) {
                   const date = r.date || r.announcedAt || r.timestamp || null;
                   const raise = r.raise || r.amount || r.investment || null;
                   const total = r.totalRaise || r.totalAmount || null;
-                  const dateStr = date ? new Date(date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+                  const dateStr = date ? new Date(date).toLocaleDateString([], { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }) : '—';
                   return (
                     <tr key={i} style={{ borderBottom: `1px solid ${BORDER}` }}>
                       <td className="py-2.5 pl-5 pr-3 font-medium" style={{ color: TEXT }}>

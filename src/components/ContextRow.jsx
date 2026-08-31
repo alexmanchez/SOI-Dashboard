@@ -84,7 +84,7 @@ export function ContextRow({
     return () => window.removeEventListener('keydown', onKey);
   }, [effectivePrev, nextDate, setAsOfDate]);
 
-  const prettyDate = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  const prettyDate = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString([], { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
 
   return (
     <div
