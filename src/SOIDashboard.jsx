@@ -13,11 +13,11 @@ import { BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2
 
 // GICS-style 5-bucket taxonomy seed (user can add/edit/remove in Settings)
 const DEFAULT_SECTORS = [
-  { id: 'infrastructure', label: 'Infrastructure',     color: ACCENT,  desc: 'L1s, L2s, scaling, execution layers' },
-  { id: 'defi',           label: 'DeFi',               color: GREEN,   desc: 'Lending, DEXes, perps, stablecoin protocols' },
-  { id: 'middleware',     label: 'Middleware',         color: VIOLET,  desc: 'Oracles, restaking, data, compute, identity' },
-  { id: 'applications',   label: 'Applications',       color: GOLD,    desc: 'Consumer, gaming, social, AI agents' },
-  { id: 'stablecoins',    label: 'Stablecoins & Cash', color: TEXT_DIM, desc: 'USDC, USDT, DAI, cash' },
+  { id: 'infrastructure', label: 'Infrastructure',     color: '#4A9EFF', desc: 'L1s, L2s, scaling, execution layers' },
+  { id: 'defi',           label: 'DeFi',               color: '#22C55E', desc: 'Lending, DEXes, perps, stablecoin protocols' },
+  { id: 'middleware',     label: 'Middleware',         color: '#A78BFA', desc: 'Oracles, restaking, data, compute, identity' },
+  { id: 'applications',   label: 'Applications',       color: '#D4A54A', desc: 'Consumer, gaming, social, AI agents' },
+  { id: 'stablecoins',    label: 'Stablecoins & Cash', color: '#8B99A8', desc: 'USDC, USDT, DAI, cash' },
 ];
 // Module-level mutable ref. Reassigned from store.sectors at top of SOIDashboard render,
 // before any useMemo/compute runs, so all downstream consumers see the current list.
