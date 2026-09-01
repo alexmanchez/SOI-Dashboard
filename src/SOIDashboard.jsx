@@ -4,25 +4,12 @@ import Papa from 'papaparse';
 import _ from 'lodash';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, LineChart, Line, ReferenceLine, ReferenceArea } from 'recharts';
 import { Upload, RefreshCw, AlertCircle, Layers, Search, Lock, ArrowLeft, FileSpreadsheet, Activity, Plus, Settings, Download, Trash2, Users, Briefcase, Building2, ChevronDown, ChevronRight, Edit2, X, Check, Eye, EyeOff, TrendingUp } from 'lucide-react';
+import { BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
+         ACCENT_11, ACCENT_22, ACCENT_44, GREEN_22, GREEN_44, RED_44, RED_66, GOLD_11, GOLD_22, GOLD_44, VIOLET_11, VIOLET_22, VIOLET_33, VIOLET_44 } from './lib/theme.js';
 
 /* =============================================================================
    CATENA — Crypto Portfolio Exposure Dashboard
    ============================================================================= */
-
-// --- Dark theme palette (Yahoo-Finance-adjacent, CA-tinted) --------------------
-const BG        = '#0B0F14';
-const PANEL     = '#111822';
-const PANEL_2   = '#161F2B';
-const BORDER    = '#22303F';
-const TEXT      = '#E6EDF3';
-const TEXT_DIM  = '#8B99A8';
-const TEXT_MUTE = '#5B6978';
-const ACCENT    = '#4A9EFF';   // CA blue, brightened for dark
-const ACCENT_2  = '#6BB6FF';
-const GREEN     = '#22C55E';
-const RED       = '#EF4444';
-const GOLD      = '#D4A54A';
-const VIOLET    = '#A78BFA';
 
 // GICS-style 5-bucket taxonomy seed (user can add/edit/remove in Settings)
 const DEFAULT_SECTORS = [
@@ -215,7 +202,7 @@ const STORE_KEY = 'catena.store.v1';
 const emptyStore = () => ({
   clients: [], managers: [], soIs: [], commitments: [],
   sectorOverrides: {}, sectors: DEFAULT_SECTORS,
-  settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null },
+  settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null, theme: 'dark' },
 });
 
 const loadStore = () => {
@@ -402,7 +389,7 @@ const seedStore = () => {
     ],
     sectorOverrides: {},
     sectors: DEFAULT_SECTORS,
-    settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null },
+    settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null, theme: 'dark' },
   };
 };
 
@@ -917,9 +904,9 @@ const SectorBadge = ({ sectorId, size='sm' }) => {
 const LiquidityBadge = ({ liquid }) => (
   <span className="rounded px-1.5 py-0.5 text-[10px] font-medium"
     style={{
-      backgroundColor: liquid ? GREEN + '22' : GOLD + '22',
+      backgroundColor: liquid ? GREEN_22 : GOLD_22,
       color: liquid ? GREEN : GOLD,
-      border: `1px solid ${liquid ? GREEN+'44' : GOLD+'44'}`,
+      border: `1px solid ${liquid ? GREEN_44 : GOLD_44}`,
     }}>
     {liquid ? 'Liquid' : 'Illiquid'}
   </span>
@@ -944,6 +931,9 @@ export default function SOIDashboard() {
   // Sync module-level SECTORS ref to the live store list before any child render / useMemo.
   SECTORS = (store.sectors && store.sectors.length) ? store.sectors : DEFAULT_SECTORS;
   useEffect(() => { saveStore(store); }, [store]);
+  useEffect(() => {
+    document.documentElement.dataset.theme = store.settings.theme || 'dark';
+  }, [store.settings.theme]);
 
   // Top-level navigation: selection + tab
   const [selection, setSelection] = useState(() => {
@@ -1096,9 +1086,9 @@ export default function SOIDashboard() {
               <button onClick={() => setClientShareMode(m => !m)}
                 className="px-2.5 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition-colors"
                 style={{
-                  backgroundColor: clientShareMode ? ACCENT + '22' : 'transparent',
+                  backgroundColor: clientShareMode ? ACCENT_22 : 'transparent',
                   color: clientShareMode ? ACCENT_2 : TEXT_DIM,
-                  border: `1px solid ${clientShareMode ? ACCENT + '44' : BORDER}`,
+                  border: `1px solid ${clientShareMode ? ACCENT_44 : BORDER}`,
                 }}>
                 {clientShareMode ? '⊗ Client share' : '⊞ Full fund'}
               </button>
@@ -1345,7 +1335,7 @@ function MenuItem({ active, onClick, children, icon, indent }) {
     <button onClick={onClick}
       className="w-full px-2.5 py-1.5 rounded text-sm flex items-center gap-2 transition-colors"
       style={{
-        backgroundColor: active ? ACCENT + '22' : 'transparent',
+        backgroundColor: active ? ACCENT_22 : 'transparent',
         color: active ? ACCENT_2 : TEXT,
         paddingLeft: indent ? 28 : undefined,
       }}>
@@ -1429,7 +1419,7 @@ function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, h
                 <span className="ml-1" style={{color:TEXT_DIM}}>{range}</span>
               </div>
               {asOfMs && (
-                <div className="text-[10px] px-2 py-0.5 rounded" style={{color: GOLD, backgroundColor: GOLD+'11', border: `1px solid ${GOLD}44`}}>
+                <div className="text-[10px] px-2 py-0.5 rounded" style={{color: GOLD, backgroundColor: GOLD_11, border: `1px solid ${GOLD_44}`}}>
                   As of {new Date(asOfMs).toLocaleDateString([], {year:'numeric', month:'short', day:'numeric'})}
                 </div>
               )}
@@ -1598,7 +1588,7 @@ function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, h
       {/* KPI ROW */}
       {rollup.fofLookThroughCount > 0 && (
         <div className="text-xs px-3 py-1.5 rounded flex items-center gap-2"
-          style={{backgroundColor: VIOLET+'11', color: VIOLET, border: `1px solid ${VIOLET}33`}}>
+          style={{backgroundColor: VIOLET_11, color: VIOLET, border: `1px solid ${VIOLET_33}`}}>
           <TrendingUp size={12} />
           Look-through from {rollup.fofLookThroughCount} fund-of-fund{rollup.fofLookThroughCount===1?'':'s'} applied — positions reflect underlying exposure
         </div>
@@ -1787,7 +1777,7 @@ function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clie
                   {m.managerName}
                   {mgr?.type === 'fund_of_funds' && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                      style={{backgroundColor: VIOLET+'22', color: VIOLET, border: `1px solid ${VIOLET}44`}}>FoF</span>
+                      style={{backgroundColor: VIOLET_22, color: VIOLET, border: `1px solid ${VIOLET_44}`}}>FoF</span>
                   )}
                 </div>
                 <div className="text-xs" style={{color:TEXT_DIM}}>{m.vintage} • As of {m.asOfDate || '—'}</div>
@@ -1977,9 +1967,9 @@ function PositionsTab({ rollup, store, updateStore }) {
                     <button onClick={()=>flipForceLiquid(t.key, !t.forceLiquid)}
                       className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded"
                       style={{
-                        backgroundColor: t.liquid ? GREEN+'22' : GOLD+'22',
+                        backgroundColor: t.liquid ? GREEN_22 : GOLD_22,
                         color: t.liquid ? GREEN : GOLD,
-                        border: `1px solid ${t.liquid ? GREEN+'44' : GOLD+'44'}`,
+                        border: `1px solid ${t.liquid ? GREEN_44 : GOLD_44}`,
                       }}
                       title={t.forceLiquid ? 'Click to revert to SOI treatment' : 'Mark as liquid (TGE\'d)'}>
                       {t.liquid ? 'Liquid' : 'Illiquid'}
@@ -2138,7 +2128,7 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
               <div className="flex items-center gap-2">
                 <select value={selectedSnapId || ''} onChange={e => setSelectedSnapId(e.target.value)}
                   className="text-xs px-2 py-1 rounded outline-none"
-                  style={{color:GOLD, backgroundColor:GOLD+'11', border:`1px solid ${GOLD}44`}}>
+                  style={{color:GOLD, backgroundColor:GOLD_11, border:`1px solid ${GOLD_44}`}}>
                   {[...snaps].reverse().map(snap => (
                     <option key={snap.id} value={snap.id}>
                       As of {snap.asOfDate || '—'}{snap.notes ? ` (${snap.notes})` : ''}
@@ -2148,13 +2138,13 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
                 {snaps.length > 1 && (
                   <button onClick={() => deleteSnapshot(selectedSnapId)}
                     className="text-xs px-2 py-1 rounded flex items-center gap-1"
-                    style={{color:RED, border:`1px solid ${RED}44`}}>
+                    style={{color:RED, border:`1px solid ${RED_44}`}}>
                     <Trash2 size={10}/> Delete snapshot
                   </button>
                 )}
               </div>
             ) : (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{color:GOLD, backgroundColor:GOLD+'11', border:`1px solid ${GOLD}44`}}>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{color:GOLD, backgroundColor:GOLD_11, border:`1px solid ${GOLD_44}`}}>
                 As of {selectedSnap?.asOfDate || '—'}
               </span>
             )}
@@ -2398,9 +2388,9 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
                       <button onClick={()=>cycleLiquidity(p.id)}
                         className="text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-1"
                         style={{
-                          backgroundColor: p.liquid ? GREEN+'22' : GOLD+'22',
+                          backgroundColor: p.liquid ? GREEN_22 : GOLD_22,
                           color: p.liquid ? GREEN : GOLD,
-                          border: `1px solid ${p.liquid ? GREEN+'44' : GOLD+'44'}`,
+                          border: `1px solid ${p.liquid ? GREEN_44 : GOLD_44}`,
                         }}
                         title={
                           override === 'auto' ? 'Click to override (next: ' + (p.liquid ? 'Illiquid' : 'Liquid') + ')' :
@@ -2928,7 +2918,7 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
             if (!existingSois.length) return null;
             const mgr = store.managers.find(m => m.id === assignManagerId);
             return (
-              <div className="p-3 rounded" style={{backgroundColor: ACCENT+'11', border: `1px solid ${ACCENT}44`}}>
+              <div className="p-3 rounded" style={{backgroundColor: ACCENT_11, border: `1px solid ${ACCENT_44}`}}>
                 <div className="text-xs font-medium mb-2" style={{color: ACCENT_2}}>
                   {mgr?.name} already has {existingSois.length} vintage{existingSois.length===1?'':'s'} in the store.
                 </div>
@@ -2976,7 +2966,7 @@ function ImportWizard({ store, updateStore, onClose, onDone, prefillTarget }) {
 
           {/* Replace-mode banner (coming from "Update holdings" on SOI detail) */}
           {isReplaceMode && prefilledSoi && (
-            <div className="p-3 rounded" style={{backgroundColor: GOLD+'11', border: `1px solid ${GOLD}44`}}>
+            <div className="p-3 rounded" style={{backgroundColor: GOLD_11, border: `1px solid ${GOLD_44}`}}>
               <div className="flex items-center gap-2 text-xs font-medium" style={{color:GOLD}}>
                 <RefreshCw size={12} /> Updating holdings
               </div>
@@ -3317,6 +3307,28 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
   return (
     <Modal title="Settings" onClose={onClose}>
       <div className="p-5 space-y-6">
+        {/* Appearance */}
+        <div>
+          <div className="text-xs uppercase tracking-wider mb-2" style={{color:TEXT_MUTE}}>Appearance</div>
+          <div className="flex gap-2">
+            {['dark', 'light'].map(t => {
+              const active = (store.settings.theme || 'dark') === t;
+              return (
+                <button key={t}
+                  onClick={() => updateStore(s => ({ ...s, settings: { ...s.settings, theme: t } }))}
+                  className="px-3 py-1.5 rounded text-xs font-medium"
+                  style={{
+                    backgroundColor: active ? ACCENT : PANEL_2,
+                    color: active ? BG : TEXT_DIM,
+                    border: `1px solid ${active ? ACCENT : BORDER}`,
+                  }}>
+                  {t === 'dark' ? 'Dark' : 'Light'}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* API Key */}
         <div>
           <div className="text-xs uppercase tracking-wider mb-2" style={{color:TEXT_MUTE}}>CoinGecko Demo API Key</div>
@@ -3395,7 +3407,7 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
                 </div>
               ) : (
                 <button onClick={()=>setConfirmingWipe(true)} className="px-3 py-1.5 rounded text-xs flex items-center gap-1"
-                  style={{color: RED, border: `1px solid ${RED}44`}}>
+                  style={{color: RED, border: `1px solid ${RED_44}`}}>
                   <Trash2 size={12} /> Wipe
                 </button>
               )}
@@ -3466,9 +3478,9 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
                         onClick={() => updateStore(s => ({ ...s, managers: s.managers.map(x => x.id === m.id ? { ...x, type: isFoF ? 'direct' : 'fund_of_funds' } : x) }))}
                         className="text-[10px] px-1.5 py-0.5 rounded font-medium"
                         style={{
-                          backgroundColor: isFoF ? VIOLET+'22' : PANEL_2,
+                          backgroundColor: isFoF ? VIOLET_22 : PANEL_2,
                           color: isFoF ? VIOLET : TEXT_DIM,
-                          border: `1px solid ${isFoF ? VIOLET+'44' : BORDER}`,
+                          border: `1px solid ${isFoF ? VIOLET_44 : BORDER}`,
                         }}
                         title="Click to toggle between Direct and Fund-of-Funds">
                         {isFoF ? 'Fund-of-Funds ✓' : 'Direct — click to set as FoF'}
@@ -3657,7 +3669,7 @@ function SectorRow({ sector, store, updateStore }) {
 
   if (deleting) {
     return (
-      <div className="p-2 rounded space-y-2" style={{backgroundColor: PANEL_2, border: `1px solid ${RED}66`}}>
+      <div className="p-2 rounded space-y-2" style={{backgroundColor: PANEL_2, border: `1px solid ${RED_66}`}}>
         <div className="text-sm">Delete <span style={{color: sector.color}}>{sector.label}</span>?</div>
         {useCount > 0 ? (
           <>
