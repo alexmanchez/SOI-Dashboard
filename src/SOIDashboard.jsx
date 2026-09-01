@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import _ from 'lodash';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, LineChart, Line, ReferenceLine, ReferenceArea } from 'recharts';
-import { Upload, RefreshCw, AlertCircle, Layers, Search, Lock, ArrowLeft, FileSpreadsheet, Activity, Plus, Settings, Download, Trash2, Users, Briefcase, Building2, ChevronDown, ChevronRight, Edit2, X, Check, Eye, EyeOff, TrendingUp } from 'lucide-react';
+import { Upload, RefreshCw, AlertCircle, Layers, Search, Lock, ArrowLeft, FileSpreadsheet, Activity, Plus, Settings, Download, Trash2, Users, Briefcase, Building2, ChevronDown, ChevronRight, Edit2, X, Check, Eye, EyeOff, TrendingUp, DollarSign, PieChart as PieIcon, LayoutDashboard } from 'lucide-react';
 import { BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
          ACCENT_11, ACCENT_22, ACCENT_44, GREEN_22, GREEN_44, RED_44, RED_66, GOLD_11, GOLD_22, GOLD_44, VIOLET_11, VIOLET_22, VIOLET_33, VIOLET_44 } from './lib/theme.js';
 
@@ -890,6 +890,19 @@ const Tab = ({ active, onClick, children, icon: Icon }) => (
   </button>
 );
 
+const MenuItem = ({ active, onClick, icon, children }) => (
+  <button onClick={onClick}
+    className="w-full text-left px-4 py-2 text-xs flex items-center gap-2 transition-colors"
+    style={{
+      color: active ? TEXT : TEXT_DIM,
+      backgroundColor: active ? ACCENT_11 : 'transparent',
+      borderLeft: `2px solid ${active ? ACCENT : 'transparent'}`,
+    }}>
+    {icon && <span style={{ color: active ? ACCENT_2 : TEXT_MUTE }}>{icon}</span>}
+    {children}
+  </button>
+);
+
 const SectorBadge = ({ sectorId, size='sm' }) => {
   const s = sectorOf(sectorId);
   const px = size === 'sm' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-xs';
@@ -946,6 +959,7 @@ export default function SOIDashboard() {
   const [tab, setTab] = useState('overview'); // overview | managers | positions | settings
   const [drilldownSoi, setDrilldownSoi] = useState(null); // when viewing a single SOI in depth
   const [range, setRange] = useState('SI');
+  const [selectedToken, setSelectedToken] = useState(null); // token detail drawer
 
   // Live prices (in-memory only; re-fetch on demand)
   const [livePrices, setLivePrices] = useState({});
@@ -1061,22 +1075,29 @@ export default function SOIDashboard() {
 
   const containerStyle = { minHeight: '100vh', backgroundColor: BG, color: TEXT, fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' };
 
+  const navGo = (t) => { setTab(t); setDrilldownSoi(null); };
+
   return (
     <div style={containerStyle}>
       {/* ========= TOP BAR ========= */}
-      <div style={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: PANEL }}>
-        <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded flex items-center justify-center"
-                 style={{ backgroundColor: ACCENT, color: BG, fontWeight: 700, fontSize: 14 }}>C</div>
+      <div style={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: PANEL, position: 'sticky', top: 0, zIndex: 50 }}>
+        <div className="px-4 py-3 flex items-center gap-4">
+          {/* Chain-link logo */}
+          <div className="flex items-center gap-2.5 flex-shrink-0">
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="32" height="32" rx="8" fill={ACCENT} fillOpacity="0.15"/>
+              <path d="M10 16C10 13.24 12.24 11 15 11H17C17.55 11 18 11.45 18 12C18 12.55 17.55 13 17 13H15C13.35 13 12 14.35 12 16C12 17.65 13.35 19 15 19H17C17.55 19 18 19.45 18 20C18 20.55 17.55 21 17 21H15C12.24 21 10 18.76 10 16Z" fill={ACCENT}/>
+              <path d="M22 16C22 18.76 19.76 21 17 21H15C14.45 21 14 20.55 14 20C14 19.45 14.45 19 15 19H17C18.65 19 20 17.65 20 16C20 14.35 18.65 13 17 13H15C14.45 13 14 12.55 14 12C14 11.45 14.45 11 15 11H17C19.76 11 22 13.24 22 16Z" fill={ACCENT}/>
+              <path d="M13 16H19" stroke={ACCENT} strokeWidth="2" strokeLinecap="round"/>
+            </svg>
             <div>
-              <div className="text-sm font-semibold tracking-tight">Catena</div>
+              <div className="text-sm font-bold tracking-tight">Catena</div>
               <div className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Portfolio Exposure</div>
             </div>
           </div>
 
           {/* Portfolio selector */}
-          <div className="flex items-center gap-2 ml-6">
+          <div className="flex items-center gap-2 ml-4">
             <PortfolioSelector
               store={store}
               selection={selection}
@@ -1097,23 +1118,30 @@ export default function SOIDashboard() {
 
           <div className="flex-1" />
 
-          {/* Live price refresh */}
-          <div className="flex items-center gap-3">
+          {/* Range pills */}
+          <div className="flex items-center gap-1 mr-2">
+            {RANGES.map(r => (
+              <Pill key={r.id} active={range===r.id} onClick={()=>setRange(r.id)}>{r.label}</Pill>
+            ))}
+          </div>
+
+          {/* Live price refresh + actions */}
+          <div className="flex items-center gap-2">
             {store.settings.lastRefresh && (
               <div className="text-xs" style={{ color: TEXT_MUTE }}>
                 Prices: {new Date(store.settings.lastRefresh).toLocaleTimeString()}
               </div>
             )}
             <button onClick={refreshPrices} disabled={priceLoading}
-              className="px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition-colors"
+              className="px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5"
               style={{ border: `1px solid ${BORDER}`, color: TEXT, backgroundColor: PANEL_2, opacity: priceLoading ? 0.6 : 1 }}>
               <RefreshCw size={12} className={priceLoading ? 'animate-spin' : ''} />
-              {priceLoading ? 'Fetching…' : 'Refresh prices'}
+              {priceLoading ? 'Fetching…' : 'Refresh'}
             </button>
             <button onClick={() => setImportOpen(true)}
               className="px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5"
               style={{ backgroundColor: ACCENT, color: BG }}>
-              <Upload size={12}/> Import SOI
+              <Upload size={12}/> Import
             </button>
             <button onClick={() => setSettingsOpen(true)}
               className="p-1.5 rounded" style={{ color: TEXT_DIM }}>
@@ -1121,23 +1149,48 @@ export default function SOIDashboard() {
             </button>
           </div>
         </div>
-
-        {/* ========= TAB BAR ========= */}
-        <div className="max-w-[1600px] mx-auto px-6 flex items-center gap-1">
-          <Tab active={tab==='overview'}  onClick={()=>{setTab('overview'); setDrilldownSoi(null);}} icon={Activity}>Overview</Tab>
-          <Tab active={tab==='managers'}  onClick={()=>{setTab('managers'); setDrilldownSoi(null);}} icon={Briefcase}>Managers</Tab>
-          <Tab active={tab==='positions'} onClick={()=>{setTab('positions'); setDrilldownSoi(null);}} icon={Layers}>Positions</Tab>
-          <div className="flex-1" />
-          <div className="flex items-center gap-1.5 py-2">
-            {RANGES.map(r => (
-              <Pill key={r.id} active={range===r.id} onClick={()=>setRange(r.id)}>{r.label}</Pill>
-            ))}
-          </div>
-        </div>
       </div>
 
-      {/* ========= MAIN ========= */}
-      <div className="max-w-[1600px] mx-auto px-6 py-6">
+      {/* ========= BODY (sidebar + main) ========= */}
+      <div className="flex" style={{ minHeight: 'calc(100vh - 57px)' }}>
+
+        {/* ========= LEFT SIDEBAR ========= */}
+        <div className="flex-shrink-0 w-[220px] flex flex-col py-4 gap-1"
+          style={{ backgroundColor: PANEL, borderRight: `1px solid ${BORDER}`, position: 'sticky', top: 57, height: 'calc(100vh - 57px)', overflowY: 'auto' }}>
+
+          {/* OVERVIEW */}
+          <div className="px-4 pb-1">
+            <div className="text-[10px] uppercase tracking-widest mb-1" style={{color:TEXT_MUTE}}>Overview</div>
+            <MenuItem active={tab==='overview' && !drilldownSoi} onClick={()=>navGo('overview')} icon={<LayoutDashboard size={15}/>}>Dashboard</MenuItem>
+          </div>
+
+          {/* HOLDINGS */}
+          <div className="px-4 pb-1">
+            <div className="text-[10px] uppercase tracking-widest mb-1 mt-2" style={{color:TEXT_MUTE}}>Holdings</div>
+            <MenuItem active={tab==='managers' && !drilldownSoi} onClick={()=>navGo('managers')} icon={<Briefcase size={15}/>}>Managers</MenuItem>
+            <MenuItem active={tab==='positions'} onClick={()=>navGo('positions')} icon={<Layers size={15}/>}>Positions</MenuItem>
+            <MenuItem active={tab==='exposures'} onClick={()=>navGo('exposures')} icon={<PieIcon size={15}/>}>Exposures</MenuItem>
+          </div>
+
+          {/* ECONOMICS */}
+          <div className="px-4 pb-1">
+            <div className="text-[10px] uppercase tracking-widest mb-1 mt-2" style={{color:TEXT_MUTE}}>Economics</div>
+            <MenuItem active={tab==='economics'} onClick={()=>navGo('economics')} icon={<DollarSign size={15}/>}>Fund Economics</MenuItem>
+          </div>
+
+          {drilldownSoi && (
+            <div className="px-4 mt-2">
+              <button onClick={() => setDrilldownSoi(null)}
+                className="text-xs flex items-center gap-1.5 px-2 py-1.5 rounded w-full"
+                style={{color:ACCENT_2, backgroundColor:ACCENT_11}}>
+                <ArrowLeft size={12}/> Back to Managers
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* ========= MAIN CONTENT ========= */}
+        <div className="flex-1 px-6 py-6 overflow-x-hidden">
         {/* Selection summary line */}
         <div className="flex items-baseline justify-between mb-6">
           <div>
@@ -1179,7 +1232,8 @@ export default function SOIDashboard() {
           <OverviewTab rollup={rollup} store={store} selection={selection}
             priceHistory={priceHistory} historyLoading={historyLoading} historyProgress={historyProgress}
             range={range} onRangeChange={setRange} onRequestFetch={fetchHistoryFor}
-            apiKey={store.settings.cgApiKey}
+            apiKey={store.settings.cgApiKey} livePrices={livePrices}
+            onTokenClick={setSelectedToken}
             clientShareMode={clientShareMode} scaleBy={scaleBy} />
         )}
         {rollup.positionCount > 0 && tab === 'managers' && !drilldownSoi && (
@@ -1204,9 +1258,17 @@ export default function SOIDashboard() {
           />
         )}
         {rollup.positionCount > 0 && tab === 'positions' && (
-          <PositionsTab rollup={rollup} store={store} updateStore={updateStore} />
+          <PositionsTab rollup={rollup} store={store} updateStore={updateStore}
+            livePrices={livePrices} priceHistory={priceHistory} onTokenClick={setSelectedToken} />
         )}
-      </div>
+        {rollup.positionCount > 0 && tab === 'exposures' && (
+          <ExposuresTab rollup={rollup} store={store} range={range} />
+        )}
+        {tab === 'economics' && (
+          <FundEconomicsTab rollup={rollup} store={store} selection={selection} />
+        )}
+      </div>{/* end main content */}
+      </div>{/* end flex body */}
 
       {importOpen && (
         <ImportWizard
@@ -1225,6 +1287,16 @@ export default function SOIDashboard() {
           setSelection={setSelection}
           onClose={() => setSettingsOpen(false)}
           onResetSeed={() => { const s = seedStore(); setStore(s); setLivePrices({}); setSelection({kind:'client', id:s.clients[0].id}); setSettingsOpen(false); }}
+        />
+      )}
+
+      {selectedToken && (
+        <TokenDrawer
+          token={selectedToken}
+          livePrices={livePrices}
+          priceHistory={priceHistory}
+          store={store}
+          onClose={() => setSelectedToken(null)}
         />
       )}
     </div>
@@ -1330,21 +1402,6 @@ function PortfolioSelector({ store, selection, onChange }) {
     </div>
   );
 }
-function MenuItem({ active, onClick, children, icon, indent }) {
-  return (
-    <button onClick={onClick}
-      className="w-full px-2.5 py-1.5 rounded text-sm flex items-center gap-2 transition-colors"
-      style={{
-        backgroundColor: active ? ACCENT_22 : 'transparent',
-        color: active ? ACCENT_2 : TEXT,
-        paddingLeft: indent ? 28 : undefined,
-      }}>
-      {icon}
-      {children}
-    </button>
-  );
-}
-
 /* =============================================================================
    PERFORMANCE CHART — Yahoo Finance-adjacent area chart
    Props:
@@ -1552,9 +1609,196 @@ function MiniSparkline({ series, width=120, height=32 }) {
 }
 
 /* =============================================================================
+   EXPOSURES TAB — sector / concentration breakdown (delegates to OverviewTab charts)
+   ============================================================================= */
+function ExposuresTab({ rollup, store, range }) {
+  const sectors = useMemo(() => {
+    const map = {};
+    for (const t of rollup.tokens) {
+      const s = sectorOf(t.sectorId);
+      if (!map[s.id]) map[s.id] = { ...s, value: 0, count: 0 };
+      map[s.id].value += t.totalValue;
+      map[s.id].count += 1;
+    }
+    return Object.values(map).sort((a, b) => b.value - a.value);
+  }, [rollup.tokens]);
+
+  const totalValue = rollup.totalValue || 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Sector breakdown pie */}
+        <div className="rounded-lg p-4" style={{ backgroundColor: PANEL, border: `1px solid ${BORDER}` }}>
+          <div className="text-sm font-semibold mb-4">Sector Allocation</div>
+          {sectors.length > 0 ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={sectors} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius={90} innerRadius={50} paddingAngle={2}>
+                  {sectors.map((s, i) => <Cell key={s.id} fill={s.color} />)}
+                </Pie>
+                <Tooltip formatter={(v) => fmtCurrency(v)} contentStyle={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, borderRadius: 6, fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="text-center py-12 text-sm" style={{ color: TEXT_MUTE }}>No positions to display</div>
+          )}
+        </div>
+
+        {/* Sector table */}
+        <div className="rounded-lg p-4" style={{ backgroundColor: PANEL, border: `1px solid ${BORDER}` }}>
+          <div className="text-sm font-semibold mb-4">Breakdown</div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr style={{ color: TEXT_MUTE }}>
+                <th className="text-left pb-2">Sector</th>
+                <th className="text-right pb-2">Value</th>
+                <th className="text-right pb-2">Weight</th>
+                <th className="text-right pb-2">Tokens</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sectors.map(s => (
+                <tr key={s.id} style={{ borderTop: `1px solid ${BORDER}` }}>
+                  <td className="py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+                      {s.label}
+                    </div>
+                  </td>
+                  <td className="py-2 text-right">{fmtCurrency(s.value)}</td>
+                  <td className="py-2 text-right" style={{ color: TEXT_DIM }}>{fmtPct(totalValue ? s.value / totalValue * 100 : 0)}</td>
+                  <td className="py-2 text-right" style={{ color: TEXT_DIM }}>{s.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Top 10 concentration */}
+      <div className="rounded-lg p-4" style={{ backgroundColor: PANEL, border: `1px solid ${BORDER}` }}>
+        <div className="text-sm font-semibold mb-4">Top 10 Positions by Exposure</div>
+        <table className="w-full text-xs">
+          <thead>
+            <tr style={{ color: TEXT_MUTE }}>
+              <th className="text-left pb-2">#</th>
+              <th className="text-left pb-2">Token</th>
+              <th className="text-left pb-2">Sector</th>
+              <th className="text-right pb-2">Value</th>
+              <th className="text-right pb-2">Weight</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rollup.tokens.slice(0, 10).map((t, i) => {
+              const sec = sectorOf(t.sectorId);
+              return (
+                <tr key={t.key} style={{ borderTop: `1px solid ${BORDER}` }}>
+                  <td className="py-2" style={{ color: TEXT_MUTE }}>{i + 1}</td>
+                  <td className="py-2 font-medium">{t.symbol || t.name}</td>
+                  <td className="py-2"><SectorBadge sectorId={t.sectorId} /></td>
+                  <td className="py-2 text-right">{fmtCurrency(t.totalValue)}</td>
+                  <td className="py-2 text-right" style={{ color: TEXT_DIM }}>{fmtPct(totalValue ? t.totalValue / totalValue * 100 : 0)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================================
+   FUND ECONOMICS TAB — commitments, called capital, MOIC, DPI, TVPI per fund
+   ============================================================================= */
+function FundEconomicsTab({ rollup, store, selection }) {
+  const rows = useMemo(() => {
+    return store.commitments.map(c => {
+      const soi = store.soIs.find(s => s.id === c.soiId);
+      const mgr = store.managers.find(m => m.id === c.managerId);
+      const client = store.clients.find(cl => cl.id === c.clientId);
+      if (!soi) return null;
+      const snap = latestSnapshot(soi);
+      const positions = snap?.positions || [];
+      const navAtSoi = _.sumBy(positions, p => p.soiMarketValue || 0);
+      const called = c.called || 0;
+      const committed = c.committed || 0;
+      const distributed = c.distributed || 0;
+      const moic = called > 0 ? (navAtSoi + distributed) / called : null;
+      const dpi = called > 0 ? distributed / called : null;
+      const tvpi = called > 0 ? (navAtSoi + distributed) / called : null;
+      const pctCalled = committed > 0 ? called / committed * 100 : null;
+      return { c, soi, mgr, client, navAtSoi, called, committed, distributed, moic, dpi, tvpi, pctCalled, snap };
+    }).filter(Boolean);
+  }, [store, rollup]);
+
+  if (rows.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 text-sm" style={{ color: TEXT_MUTE }}>
+        No commitments found. Import an SOI and add commitment data in Managers.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg overflow-hidden" style={{ backgroundColor: PANEL, border: `1px solid ${BORDER}` }}>
+        <table className="w-full text-xs">
+          <thead>
+            <tr style={{ backgroundColor: PANEL_2 }}>
+              <th className="text-left px-3 py-2.5" style={{ color: TEXT_MUTE }}>Fund</th>
+              <th className="text-left px-3 py-2.5" style={{ color: TEXT_MUTE }}>Manager</th>
+              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>Committed</th>
+              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>Called</th>
+              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>% Called</th>
+              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>NAV (SOI)</th>
+              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>MOIC</th>
+              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>DPI</th>
+              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>As of</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ c, soi, mgr, navAtSoi, called, committed, distributed, moic, dpi, pctCalled, snap }) => (
+              <tr key={c.id} style={{ borderTop: `1px solid ${BORDER}` }}>
+                <td className="px-3 py-2.5 font-medium">{soi.fundName || soi.vintage}</td>
+                <td className="px-3 py-2.5" style={{ color: TEXT_DIM }}>{mgr?.name || '—'}</td>
+                <td className="px-3 py-2.5 text-right">{fmtCurrency(committed)}</td>
+                <td className="px-3 py-2.5 text-right">{fmtCurrency(called)}</td>
+                <td className="px-3 py-2.5 text-right" style={{ color: TEXT_DIM }}>{pctCalled != null ? fmtPct(pctCalled, 0) : '—'}</td>
+                <td className="px-3 py-2.5 text-right">{fmtCurrency(navAtSoi)}</td>
+                <td className="px-3 py-2.5 text-right font-medium" style={{ color: moic != null && moic >= 1 ? GREEN : moic != null ? RED : TEXT_DIM }}>
+                  {fmtMoic(moic)}
+                </td>
+                <td className="px-3 py-2.5 text-right" style={{ color: TEXT_DIM }}>{fmtMoic(dpi)}</td>
+                <td className="px-3 py-2.5 text-right" style={{ color: TEXT_MUTE }}>{snap?.asOfDate || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr style={{ borderTop: `2px solid ${BORDER}`, backgroundColor: PANEL_2 }}>
+              <td className="px-3 py-2.5 font-semibold" colSpan={2}>Total</td>
+              <td className="px-3 py-2.5 text-right font-semibold">{fmtCurrency(_.sumBy(rows, r => r.committed))}</td>
+              <td className="px-3 py-2.5 text-right font-semibold">{fmtCurrency(_.sumBy(rows, r => r.called))}</td>
+              <td className="px-3 py-2.5 text-right" style={{ color: TEXT_DIM }}>
+                {(() => { const tot = _.sumBy(rows, r => r.committed); const cal = _.sumBy(rows, r => r.called); return tot > 0 ? fmtPct(cal/tot*100, 0) : '—'; })()}
+              </td>
+              <td className="px-3 py-2.5 text-right font-semibold">{fmtCurrency(_.sumBy(rows, r => r.navAtSoi))}</td>
+              <td className="px-3 py-2.5 text-right font-semibold" colSpan={3}>
+                {(() => { const called = _.sumBy(rows, r => r.called); const nav = _.sumBy(rows, r => r.navAtSoi); const dist = _.sumBy(rows, r => r.distributed); return called > 0 ? fmtMoic((nav + dist) / called) : '—'; })()}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================================
    OVERVIEW TAB — the headline view (sector tilts, top tokens, concentration)
    ============================================================================= */
-function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, clientShareMode, scaleBy }) {
+function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, livePrices, onTokenClick, clientShareMode, scaleBy }) {
   const clientEconomics = useMemo(() => {
     if (selection?.kind !== 'client') return null;
     const commits = store.commitments.filter(c => c.clientId === selection.id);
@@ -1714,7 +1958,9 @@ function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, h
             </thead>
             <tbody>
               {rollup.tokenRollup.slice(0, 10).map(t => (
-                <tr key={t.key} style={{ borderTop: `1px solid ${BORDER}` }}>
+                <tr key={t.key} onClick={() => onTokenClick(t)}
+                  className="cursor-pointer transition-colors hover:bg-white/5"
+                  style={{ borderTop: `1px solid ${BORDER}` }}>
                   <td className="py-2.5 pr-3">
                     <div className="font-medium">{t.symbol || t.name}</div>
                     {t.symbol && t.name !== t.symbol && <div className="text-[10px]" style={{color:TEXT_MUTE}}>{t.name}</div>}
@@ -1838,7 +2084,7 @@ function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clie
 /* =============================================================================
    POSITIONS TAB — flat rolled-up table of every underlying token
    ============================================================================= */
-function PositionsTab({ rollup, store, updateStore }) {
+function PositionsTab({ rollup, store, updateStore, livePrices, priceHistory, onTokenClick }) {
   const [search, setSearch] = useState('');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [liquidityFilter, setLiquidityFilter] = useState('all');
@@ -1945,8 +2191,10 @@ function PositionsTab({ rollup, store, updateStore }) {
               {rows.map(t => (
                 <tr key={t.key} style={{ borderBottom: `1px solid ${BORDER}` }}>
                   <td className="px-3 py-2.5">
-                    <div className="font-medium">{t.symbol || t.name}</div>
-                    {t.symbol && t.name !== t.symbol && <div className="text-[10px]" style={{color:TEXT_MUTE}}>{t.name}</div>}
+                    <button onClick={() => onTokenClick(t)} className="text-left group">
+                      <div className="font-medium group-hover:underline" style={{color:ACCENT}}>{t.symbol || t.name}</div>
+                      {t.symbol && t.name !== t.symbol && <div className="text-[10px]" style={{color:TEXT_MUTE}}>{t.name}</div>}
+                    </button>
                     <div className="text-[10px] mt-0.5" style={{color:TEXT_MUTE}}>
                       {t.managers.slice(0,2).join(' • ')}{t.managers.length>2 ? ` +${t.managers.length-2}` : ''}
                     </div>
@@ -3159,6 +3407,153 @@ function DropZone({ onFile, loading }) {
 /* =============================================================================
    SETTINGS DRAWER
    ============================================================================= */
+/* =============================================================================
+   TOKEN DETAIL DRAWER
+   ============================================================================= */
+function TokenDrawer({ token, livePrices, priceHistory, store, onClose }) {
+  const cgId = token.positions?.find(p => p.cgTokenId)?.cgTokenId || null;
+  const live = cgId ? livePrices[cgId] : null;
+  const history = cgId ? priceHistory[cgId] : null;
+
+  const chartData = useMemo(() => {
+    if (!history) return [];
+    return Object.entries(history)
+      .map(([ms, price]) => ({ ms: +ms, price }))
+      .sort((a, b) => a.ms - b.ms)
+      .slice(-60); // last 60 days max
+  }, [history]);
+
+  const chartMin = chartData.length ? Math.min(...chartData.map(d => d.price)) * 0.97 : 0;
+  const chartMax = chartData.length ? Math.max(...chartData.map(d => d.price)) * 1.03 : 0;
+
+  const sector = sectorOf(token.sectorId);
+  const livePrice = live?.usd ?? token.livePrice ?? null;
+  const change = live?.change24h ?? token.change24h ?? null;
+  const changeColor = change == null ? TEXT_DIM : change >= 0 ? GREEN : RED;
+
+  // Funds breakdown from positions
+  const byFund = useMemo(() => {
+    const map = {};
+    for (const p of (token.positions || [])) {
+      const key = `${p.managerName} ${p.vintage}`;
+      if (!map[key]) map[key] = { label: key, value: 0 };
+      map[key].value += p.currentValue || 0;
+    }
+    return Object.values(map).sort((a, b) => b.value - a.value);
+  }, [token.positions]);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div onClick={onClose}
+        style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(2px)' }} />
+      {/* Drawer */}
+      <div style={{
+        position: 'fixed', right: 0, top: 0, bottom: 0, width: 380, zIndex: 201,
+        backgroundColor: PANEL, borderLeft: `1px solid ${BORDER}`,
+        display: 'flex', flexDirection: 'column', overflowY: 'auto',
+        boxShadow: '-8px 0 30px rgba(0,0,0,0.4)',
+      }}>
+        {/* Header */}
+        <div className="flex items-start justify-between p-4 pb-3" style={{borderBottom:`1px solid ${BORDER}`}}>
+          <div>
+            <div className="text-xl font-bold tracking-tight">{token.symbol || token.name}</div>
+            {token.symbol && token.name !== token.symbol && (
+              <div className="text-sm mt-0.5" style={{color:TEXT_DIM}}>{token.name}</div>
+            )}
+            <div className="mt-1.5">
+              <span className="text-[11px] px-2 py-0.5 rounded font-medium"
+                style={{backgroundColor: sector.color+'22', color: sector.color, border:`1px solid ${sector.color}44`}}>
+                {sector.label}
+              </span>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded" style={{color:TEXT_DIM}}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="flex-1 p-4 space-y-5">
+          {/* Live price */}
+          {livePrice != null ? (
+            <div>
+              <div className="text-2xl font-bold tabular-nums">${livePrice.toLocaleString(undefined, { maximumFractionDigits: 6 })}</div>
+              {change != null && (
+                <div className="text-sm mt-0.5 tabular-nums" style={{color: changeColor}}>
+                  {change >= 0 ? '+' : ''}{change.toFixed(2)}% 24h
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-sm" style={{color:TEXT_DIM}}>
+              No live price — add a CoinGecko API key in Settings and refresh.
+            </div>
+          )}
+
+          {/* Price chart */}
+          {chartData.length > 1 ? (
+            <div>
+              <div className="text-[11px] uppercase tracking-wider mb-2" style={{color:TEXT_MUTE}}>
+                Price history ({chartData.length}d)
+              </div>
+              <ResponsiveContainer width="100%" height={140}>
+                <AreaChart data={chartData} margin={{top:4,right:0,bottom:0,left:0}}>
+                  <defs>
+                    <linearGradient id="tdrGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor={ACCENT} stopOpacity={0.25} />
+                      <stop offset="95%" stopColor={ACCENT} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="ms" hide />
+                  <YAxis domain={[chartMin, chartMax]} hide />
+                  <Tooltip
+                    contentStyle={{backgroundColor:PANEL_2, border:`1px solid ${BORDER}`, borderRadius:6, fontSize:11}}
+                    labelFormatter={ms => new Date(ms).toLocaleDateString([], {month:'short', day:'numeric'})}
+                    formatter={v => ['$' + v.toLocaleString(undefined, {maximumFractionDigits:4}), 'Price']}
+                    itemStyle={{color:TEXT}}
+                  />
+                  <Area type="monotone" dataKey="price" stroke={ACCENT} strokeWidth={1.5}
+                    fill="url(#tdrGrad)" dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : cgId ? (
+            <div className="text-xs p-3 rounded" style={{backgroundColor:PANEL_2, color:TEXT_DIM}}>
+              No price history loaded — click Refresh prices in the top bar.
+            </div>
+          ) : null}
+
+          {/* Fund breakdown */}
+          <div>
+            <div className="text-[11px] uppercase tracking-wider mb-2" style={{color:TEXT_MUTE}}>
+              Held in {byFund.length} fund{byFund.length !== 1 ? 's' : ''}
+            </div>
+            <div className="space-y-1">
+              {byFund.map(f => (
+                <div key={f.label} className="flex items-center justify-between text-sm">
+                  <span style={{color:TEXT_DIM}} className="truncate pr-2">{f.label}</span>
+                  <span className="tabular-nums font-medium flex-shrink-0">{fmtCurrency(f.value)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between text-sm mt-2 pt-2" style={{borderTop:`1px solid ${BORDER}`}}>
+              <span style={{color:TEXT_MUTE}}>Total exposure</span>
+              <span className="tabular-nums font-bold">{fmtCurrency(token.value)}</span>
+            </div>
+          </div>
+
+          {/* CoinGecko link */}
+          {cgId && (
+            <div className="text-xs" style={{color:TEXT_MUTE}}>
+              CoinGecko ID: <span style={{color:ACCENT_2}}>{cgId}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, onResetSeed }) {
   const managerById = useMemo(() => Object.fromEntries(store.managers.map(m => [m.id, m])), [store.managers]);
 

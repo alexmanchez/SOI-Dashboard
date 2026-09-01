@@ -35,8 +35,10 @@
   --catena-violet:     109 40 217;
 }
 
-body {
+html, body {
   margin: 0;
+  background-color: rgb(var(--catena-bg));
+  color: rgb(var(--catena-text));
   font-family: system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
