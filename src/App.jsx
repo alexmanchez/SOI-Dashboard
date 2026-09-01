@@ -20,6 +20,7 @@ import {
   loadStore, saveStore, emptyStore,
 } from './lib/storage';
 import { seedStore } from './lib/seed';
+import { loadPriceCache, savePriceCache, clearPriceCache } from './lib/priceCache';
 import {
   latestSnapshot, distinctSnapshotDates, snapshotsOf,
 } from './lib/snapshots';
@@ -173,8 +174,10 @@ export default function App() {
 
   // Historical prices — keyed by cgTokenId → { [utcDayMs]: close }
   // Stored by (tokenId, maxDaysFetched) so we don't re-fetch if we already have enough
-  const [priceHistory, setPriceHistory] = useState({});
-  const [historyFetched, setHistoryFetched] = useState({}); // { [tokenId]: daysFetched }
+  // Seed from the persisted cache so a reload doesn't refetch every 365-day
+  // series — the call that actually trips CoinGecko's keyless rate limit.
+  const [priceHistory, setPriceHistory] = useState(() => loadPriceCache().history);
+  const [historyFetched, setHistoryFetched] = useState(() => loadPriceCache().fetched); // { [tokenId]: daysFetched }
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyProgress, setHistoryProgress] = useState({ current: 0, total: 0, token: '' });
 
@@ -214,6 +217,12 @@ export default function App() {
     const { prices, error } = await fetchLivePrices(allCgIds, effectiveApiKey);
     setLivePrices(prices);
     if (error) setPriceError(error);
+    // Refresh is the explicit "go get fresh data" gesture, so it also drops the
+    // cached history and clears coverage — the chart's effect then refetches.
+    // Everything else reads the cache, which is what keeps the keyless tier
+    // inside its rate limit.
+    clearPriceCache();
+    setHistoryFetched({});
     updateStore(s => ({ ...s, settings: { ...s.settings, lastRefresh: new Date().toISOString() } }));
     setPriceLoading(false);
   }, [allCgIds, effectiveApiKey, updateStore, useLivePrices]);
@@ -234,21 +243,28 @@ export default function App() {
       (current, total, token) => setHistoryProgress({ current, total, token })
     );
     if (error) setPriceError(error);
-    setPriceHistory(prev => {
-      const merged = { ...prev };
-      for (const [id, byDay] of Object.entries(history)) {
-        merged[id] = { ...(merged[id] || {}), ...byDay };
-      }
-      return merged;
-    });
-    setHistoryFetched(prev => {
-      const next = { ...prev };
-      for (const id of missing) next[id] = Math.max(next[id] || 0, cappedDays);
-      return next;
-    });
+    // Merge against the current values rather than inside a state updater.
+    // React defers updater functions, so reading their result on the next line
+    // yields null and the cache write silently never happens.
+    const mergedHistory = { ...priceHistory };
+    for (const [id, byDay] of Object.entries(history)) {
+      mergedHistory[id] = { ...(mergedHistory[id] || {}), ...byDay };
+    }
+    const mergedFetched = { ...historyFetched };
+    // Only record coverage for tokens that actually returned data, or a
+    // throttled fetch would be remembered as "already fetched" and the gap
+    // would never be retried.
+    for (const id of missing) {
+      if (history[id]) mergedFetched[id] = Math.max(mergedFetched[id] || 0, cappedDays);
+    }
+    setPriceHistory(mergedHistory);
+    setHistoryFetched(mergedFetched);
+    // Persist whatever arrived. A throttled pass returns only some tokens, so
+    // each visit adds to the cache rather than starting over.
+    if (Object.keys(history).length) savePriceCache(mergedHistory, mergedFetched);
     setHistoryLoading(false);
     setHistoryProgress({ current: 0, total: 0, token: '' });
-  }, [effectiveApiKey, historyFetched, useLivePrices]);
+  }, [effectiveApiKey, historyFetched, priceHistory, useLivePrices]);
 
   // Pro-rata scale factor per SOI (client called / fund total MV)
   const scaleBy = useMemo(() => {
