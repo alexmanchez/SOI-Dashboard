@@ -4,6 +4,7 @@ import Papa from 'papaparse';
 import _ from 'lodash';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, LineChart, Line, ReferenceLine, ReferenceArea, Sankey, Layer, Rectangle } from 'recharts';
 import { Upload, RefreshCw, AlertCircle, Layers, Search, Lock, ArrowLeft, FileSpreadsheet, Activity, Plus, Settings, Download, Trash2, Users, Briefcase, Building2, ChevronDown, ChevronRight, Edit2, X, Check, Eye, EyeOff, TrendingUp, DollarSign, PieChart as PieIcon, LayoutDashboard } from 'lucide-react';
+import catenaLogo from './assets/catena-logo.png';
 import { BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
          ACCENT_11, ACCENT_22, ACCENT_44, GREEN_22, GREEN_44, RED_44, RED_66, GOLD_11, GOLD_22, GOLD_44, VIOLET_11, VIOLET_22, VIOLET_33, VIOLET_44 } from './lib/theme.js';
 
@@ -1095,14 +1096,10 @@ export default function SOIDashboard() {
       {/* ========= TOP BAR ========= */}
       <div ref={topBarRef} style={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: PANEL, position: 'sticky', top: 0, zIndex: 50 }}>
         <div className="px-4 py-3 flex items-center gap-4">
-          {/* Chain-link logo */}
+          {/* Catena chain-link logo */}
           <div className="flex items-center gap-2.5 flex-shrink-0">
-            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="32" height="32" rx="8" fill={ACCENT} fillOpacity="0.15"/>
-              <path d="M10 16C10 13.24 12.24 11 15 11H17C17.55 11 18 11.45 18 12C18 12.55 17.55 13 17 13H15C13.35 13 12 14.35 12 16C12 17.65 13.35 19 15 19H17C17.55 19 18 19.45 18 20C18 20.55 17.55 21 17 21H15C12.24 21 10 18.76 10 16Z" fill={ACCENT}/>
-              <path d="M22 16C22 18.76 19.76 21 17 21H15C14.45 21 14 20.55 14 20C14 19.45 14.45 19 15 19H17C18.65 19 20 17.65 20 16C20 14.35 18.65 13 17 13H15C14.45 13 14 12.55 14 12C14 11.45 14.45 11 15 11H17C19.76 11 22 13.24 22 16Z" fill={ACCENT}/>
-              <path d="M13 16H19" stroke={ACCENT} strokeWidth="2" strokeLinecap="round"/>
-            </svg>
+            <img src={catenaLogo} alt="Catena" width={32} height={32}
+              className="rounded" style={{ display: 'block', objectFit: 'cover' }} />
             <div>
               <div className="text-sm font-bold tracking-tight">Catena</div>
               <div className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Portfolio Exposure</div>
@@ -1358,9 +1355,6 @@ function PortfolioSelector({ store, selection, onChange }) {
               onClick={() => { onChange({ kind: 'all' }); setOpen(false); }}
               icon={<Users size={14} />}>
               All Clients
-              <span className="ml-auto text-[10px]" style={{ color: TEXT_MUTE }}>
-                {store.soIs.length} SOIs
-              </span>
             </MenuItem>
           </div>
           {store.clients.length > 0 && (
