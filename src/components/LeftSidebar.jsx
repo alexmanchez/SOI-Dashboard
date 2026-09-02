@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Layers, PieChart as PieChartIcon, DollarSign, TrendingUp,
+  LayoutDashboard, Layers, PieChart as PieChartIcon, DollarSign, TrendingUp, Columns3,
 } from 'lucide-react';
 
 import { BORDER, PANEL, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2 } from '../lib/theme';
@@ -13,8 +13,9 @@ export const SIDEBAR_SECTIONS = [
     { id: 'rounds',         label: 'Recent Rounds', icon: TrendingUp },
   ]},
   { group: 'Holdings', items: [
-    { id: 'positions',      label: 'Positions',     icon: Layers },
-    { id: 'exposures',      label: 'Exposures',     icon: PieChartIcon },
+    { id: 'positions',       label: 'Positions',     icon: Layers },
+    { id: 'exposures',       label: 'Exposures',     icon: PieChartIcon },
+    { id: 'fund-comparison', label: 'Compare Funds', icon: Columns3 },
   ]},
   { group: 'Economics', items: [
     { id: 'fund-economics', label: 'Fund Economics', icon: DollarSign },

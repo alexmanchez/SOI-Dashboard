@@ -58,6 +58,7 @@ import {
   OverviewTab,
 } from './pages/OverviewTab';
 import { ExposuresPage } from './pages/ExposuresPage';
+import { FundComparisonPage } from './pages/FundComparisonPage';
 import { FundEconomicsPage } from './pages/FundEconomicsPage';
 import { ManagersTab } from './pages/ManagersTab';
 import { PositionsTab } from './pages/PositionsTab';
@@ -496,6 +497,9 @@ export default function App() {
             )}
             {subPage === 'exposures' && (
               <ExposuresPage rollup={rollup} selection={selection} />
+            )}
+            {subPage === 'fund-comparison' && (
+              <FundComparisonPage store={store} selection={selection} asOfDate={asOfDate} />
             )}
             {subPage === 'rounds' && !drilldownSoi && selection.kind === 'manager' && (
               <ManagerRoundsPage
