@@ -203,7 +203,7 @@ const STORE_KEY = 'catena.store.v1';
 const emptyStore = () => ({
   clients: [], managers: [], soIs: [], commitments: [],
   sectorOverrides: {}, sectors: DEFAULT_SECTORS,
-  settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null, theme: 'dark' },
+  settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null, theme: 'dark', priceSource: 'coingecko' },
 });
 
 const loadStore = () => {
@@ -390,7 +390,7 @@ const seedStore = () => {
     ],
     sectorOverrides: {},
     sectors: DEFAULT_SECTORS,
-    settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null, theme: 'dark' },
+    settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null, theme: 'dark', priceSource: 'coingecko' },
   };
 };
 
@@ -759,6 +759,51 @@ const fetchLivePrices = async (tokenIds, apiKey) => {
   return { prices: out, error: null };
 };
 
+/* =============================================================================
+   COINMARKETCAP LIVE PRICES (via our own /api/cmc proxy)
+   ---------------------------------------------------------
+   CMC blocks browser-origin requests and a key in client code would be public,
+   so this goes through the serverless function in /api/cmc.js.
+
+   CMC keys quotes by ticker; the rest of the app keys prices by cgTokenId. We
+   translate here so every downstream consumer stays unchanged.
+
+   Note: the free plan has no historical endpoint, so charts still use CoinGecko.
+   ============================================================================= */
+const fetchLivePricesCMC = async (symbolToCgIds) => {
+  const symbols = Object.keys(symbolToCgIds);
+  if (!symbols.length) return { prices: {}, error: null };
+
+  const out = {};
+  // The quotes endpoint takes many symbols per call; stay well inside the limit.
+  for (const batch of _.chunk(symbols, 100)) {
+    try {
+      const res = await fetch(`/api/cmc?endpoint=quotes&symbol=${batch.join(',')}&convert=USD`);
+      const data = await res.json();
+      if (!res.ok) return { prices: out, error: data?.error || `CoinMarketCap returned ${res.status}.` };
+
+      for (const [symbol, entries] of Object.entries(data.data || {})) {
+        // v2 returns an array per symbol because tickers collide in crypto.
+        // Prefer the best-ranked listing so we don't price a position off a
+        // namesake token with the same symbol.
+        const list = Array.isArray(entries) ? entries : [entries];
+        const best = list
+          .filter(Boolean)
+          .sort((a, b) => (a.cmc_rank ?? Infinity) - (b.cmc_rank ?? Infinity))[0];
+        const usd = best?.quote?.USD;
+        if (!usd || usd.price == null) continue;
+
+        for (const cgId of (symbolToCgIds[symbol] || [])) {
+          out[cgId] = { usd: usd.price, change24h: usd.percent_change_24h ?? null };
+        }
+      }
+    } catch (e) {
+      return { prices: out, error: 'Could not reach the price proxy. Is the dev server running?' };
+    }
+  }
+  return { prices: out, error: null };
+};
+
 /* Historical prices: fetch up to N days of daily closes for a list of coin ids.
    Returns { [coinId]: { [utcMidnightMs]: closePrice } }
    Uses /coins/{id}/market_chart?vs_currency=usd&days=N&interval=daily
@@ -1098,18 +1143,40 @@ export default function SOIDashboard() {
     return [...ids];
   }, [store.soIs]);
 
-  const refreshPrices = useCallback(async () => {
-    if (!store.settings.cgApiKey) {
-      setPriceError('Add a CoinGecko Demo API key in Settings to enable live prices.');
-      return;
+  // Ticker -> the cgTokenIds it maps to, for the CMC path (which keys by symbol).
+  const symbolToCgIds = useMemo(() => {
+    const map = {};
+    for (const soi of store.soIs) {
+      for (const p of (latestSnapshot(soi)?.positions || [])) {
+        if (!p.ticker || !p.cgTokenId) continue;
+        const sym = p.ticker.toUpperCase();
+        (map[sym] ||= new Set()).add(p.cgTokenId);
+      }
     }
+    return Object.fromEntries(Object.entries(map).map(([k, v]) => [k, [...v]]));
+  }, [store.soIs]);
+
+  const refreshPrices = useCallback(async () => {
+    const source = store.settings.priceSource || 'coingecko';
     setPriceLoading(true); setPriceError(null);
-    const { prices, error } = await fetchLivePrices(allCgIds, store.settings.cgApiKey);
-    setLivePrices(prices);
-    if (error) setPriceError(error);
+
+    let result;
+    if (source === 'coinmarketcap') {
+      result = await fetchLivePricesCMC(symbolToCgIds);
+    } else {
+      if (!store.settings.cgApiKey) {
+        setPriceError('Add a CoinGecko Demo API key in Settings, or switch the price source to CoinMarketCap.');
+        setPriceLoading(false);
+        return;
+      }
+      result = await fetchLivePrices(allCgIds, store.settings.cgApiKey);
+    }
+
+    setLivePrices(result.prices);
+    if (result.error) setPriceError(result.error);
     updateStore(s => ({ ...s, settings: { ...s.settings, lastRefresh: new Date().toISOString() } }));
     setPriceLoading(false);
-  }, [allCgIds, store.settings.cgApiKey, updateStore]);
+  }, [allCgIds, symbolToCgIds, store.settings.cgApiKey, store.settings.priceSource, updateStore]);
 
   // Fetch historical price data for the given scope + days window.
   // Skips tokens we already have sufficient history for.
@@ -4739,6 +4806,36 @@ function SettingsDrawer({ store, updateStore, selection, setSelection, onClose, 
                 </button>
               );
             })}
+          </div>
+        </div>
+
+        {/* Price source */}
+        <div>
+          <div className="text-xs uppercase tracking-wider mb-2" style={{color:TEXT_MUTE}}>Live price source</div>
+          <div className="flex gap-2">
+            {[
+              { id: 'coingecko',     label: 'CoinGecko' },
+              { id: 'coinmarketcap', label: 'CoinMarketCap' },
+            ].map(src => {
+              const active = (store.settings.priceSource || 'coingecko') === src.id;
+              return (
+                <button key={src.id}
+                  onClick={() => updateStore(s => ({ ...s, settings: { ...s.settings, priceSource: src.id } }))}
+                  className="px-3 py-1.5 rounded text-xs font-medium flex-1"
+                  style={{
+                    backgroundColor: active ? ACCENT : PANEL_2,
+                    color: active ? BG : TEXT_DIM,
+                    border: `1px solid ${active ? ACCENT : BORDER}`,
+                  }}>
+                  {src.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="text-[11px] mt-2" style={{color:TEXT_MUTE}}>
+            {(store.settings.priceSource || 'coingecko') === 'coinmarketcap'
+              ? 'Quotes come through this app\'s own server, which holds the CoinMarketCap key — no key is needed here. Price history still uses CoinGecko: CMC\'s free plan has no historical endpoint.'
+              : 'CoinGecko covers both live prices and the history behind the charts, using the Demo key below.'}
           </div>
         </div>
 
