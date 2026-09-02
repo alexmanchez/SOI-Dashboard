@@ -6,7 +6,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAx
 import { Upload, RefreshCw, AlertCircle, Layers, Search, Lock, ArrowLeft, FileSpreadsheet, Activity, Plus, Settings, Download, Trash2, Users, Briefcase, Building2, ChevronDown, ChevronRight, Edit2, X, Check, Eye, EyeOff, TrendingUp, DollarSign, PieChart as PieIcon, LayoutDashboard } from 'lucide-react';
 import catenaLogo from './assets/catena-logo.png';
 import { BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
-         ACCENT_11, ACCENT_22, ACCENT_44, GREEN_22, GREEN_44, RED_44, RED_66, GOLD_11, GOLD_22, GOLD_44, VIOLET_11, VIOLET_22, VIOLET_33, VIOLET_44 } from './lib/theme.js';
+         ACCENT_11, ACCENT_22, ACCENT_33, ACCENT_44, GREEN_22, GREEN_44, RED_44, RED_66, GOLD_11, GOLD_22, GOLD_44, VIOLET_11, VIOLET_22, VIOLET_33, VIOLET_44 } from './lib/theme.js';
 
 /* =============================================================================
    CATENA — Crypto Portfolio Exposure Dashboard
@@ -391,6 +391,108 @@ const seedStore = () => {
     sectorOverrides: {},
     sectors: DEFAULT_SECTORS,
     settings: { cgApiKey: '', useLivePrices: false, lastRefresh: null, theme: 'dark' },
+  };
+};
+
+/* =============================================================================
+   CROSS-FUND HOLDINGS COMPARISON
+   ---------------------------------
+   Pivots every fund in scope into one token x fund matrix so the same holding
+   can be read across managers — the overlap question a fund-of-funds allocator
+   actually asks ("how much ETH do I own, and through whom?").
+
+   A direct fund contributes its positions at face value. A fund-of-funds is
+   looked through to its underlying funds and scaled by its ownership of each
+   (called / underlying NAV) — the same basis computeRollup uses — so a FoF
+   column is comparable to a direct column rather than double-counting.
+   ============================================================================= */
+const fundLabelOf = (soi) => soi?.fundName || soi?.vintage || 'Untitled fund';
+
+const buildFundComparison = (store, soiIds = null) => {
+  const managerById = Object.fromEntries(store.managers.map(m => [m.id, m]));
+  const inScope = soiIds ? store.soIs.filter(s => soiIds.includes(s.id)) : store.soIs;
+
+  const columns = [];       // one per fund
+  const byToken = new Map(); // tokenKey -> { key, symbol, name, sectorId, values: {soiId: v}, total }
+
+  const add = (colId, p, scale) => {
+    const key = (p.ticker || p.positionName || '').toUpperCase().trim();
+    if (!key) return;
+    const value = (p.soiMarketValue || 0) * scale;
+    if (value <= 0) return;
+    if (!byToken.has(key)) {
+      byToken.set(key, {
+        key,
+        symbol: p.ticker || '',
+        name: p.positionName,
+        sectorId: resolveSector(p, store.sectorOverrides),
+        values: {},
+        total: 0,
+      });
+    }
+    const row = byToken.get(key);
+    row.values[colId] = (row.values[colId] || 0) + value;
+    row.total += value;
+  };
+
+  for (const soi of inScope) {
+    const manager = managerById[soi.managerId];
+    const isFoF = manager?.type === 'fund_of_funds';
+    const snap = latestSnapshot(soi);
+
+    if (isFoF) {
+      const subs = snap?.subCommitments || [];
+      if (!subs.length) continue;
+      columns.push({ id: soi.id, label: fundLabelOf(soi), manager: manager?.name || '—', isFoF, total: 0 });
+
+      for (const sub of subs) {
+        const target = store.soIs.find(s => s.id === sub.toSoiId);
+        if (!target) continue;
+        // Nested FoFs are out of scope here, same as the rollup engine.
+        if (managerById[target.managerId]?.type === 'fund_of_funds') continue;
+        const positions = latestSnapshot(target)?.positions || [];
+        const underlyingMV = _.sumBy(positions, p => p.soiMarketValue || 0);
+        if (underlyingMV <= 0) continue;
+        const fofShare = (sub.called || 0) / underlyingMV;
+        for (const p of positions) add(soi.id, p, fofShare);
+      }
+    } else {
+      const positions = snap?.positions || [];
+      if (!positions.length) continue;
+      columns.push({ id: soi.id, label: fundLabelOf(soi), manager: manager?.name || '—', isFoF, total: 0 });
+      for (const p of positions) add(soi.id, p, 1);
+    }
+  }
+
+  const rows = [...byToken.values()].sort((a, b) => b.total - a.total);
+
+  // Column totals + how many funds each token appears in.
+  for (const col of columns) col.total = _.sumBy(rows, r => r.values[col.id] || 0);
+  for (const r of rows) r.fundCount = columns.filter(c => (r.values[c.id] || 0) > 0).length;
+
+  const grandTotal = _.sumBy(columns, 'total');
+  const overlapRows = rows.filter(r => r.fundCount > 1);
+  const overlapValue = _.sumBy(overlapRows, 'total');
+
+  // A FoF column and its own underlying funds describe the same money twice.
+  // Comparing them side by side is the point of this view, but the totals are
+  // then not a net exposure figure — so surface it rather than quietly summing.
+  const selectedIds = new Set(columns.map(c => c.id));
+  const doubleCounted = [];
+  for (const col of columns.filter(c => c.isFoF)) {
+    const soi = inScope.find(s => s.id === col.id);
+    const nested = (latestSnapshot(soi)?.subCommitments || [])
+      .map(sub => sub.toSoiId)
+      .filter(id => selectedIds.has(id))
+      .map(id => fundLabelOf(store.soIs.find(s => s.id === id)));
+    if (nested.length) doubleCounted.push({ fof: col.label, underlying: nested });
+  }
+
+  return {
+    columns, rows, grandTotal, doubleCounted,
+    overlapCount: overlapRows.length,
+    overlapValue,
+    overlapPct: grandTotal > 0 ? (overlapValue / grandTotal) * 100 : 0,
   };
 };
 
@@ -937,11 +1039,9 @@ const ChangeCell = ({ value, format='pct' }) => {
    MAIN APP
    ============================================================================= */
 export default function SOIDashboard() {
-  const [store, setStore] = useState(() => {
-    const loaded = loadStore();
-    if (loaded && (loaded.soIs.length || loaded.clients.length)) return loaded;
-    return seedStore();
-  });
+  // Start empty rather than seeding demo managers — sample data stays available
+  // on demand from Settings so the app still has something to show on request.
+  const [store, setStore] = useState(() => loadStore() || emptyStore());
   // Sync module-level SECTORS ref to the live store list before any child render / useMemo.
   SECTORS = (store.sectors && store.sectors.length) ? store.sectors : DEFAULT_SECTORS;
   useEffect(() => { saveStore(store); }, [store]);
@@ -952,9 +1052,8 @@ export default function SOIDashboard() {
   // Top-level navigation: selection + tab
   const [selection, setSelection] = useState(() => {
     // Start scoped to the first client if one exists (most useful default)
-    const loaded = loadStore() || seedStore();
-    if (loaded.clients.length === 1) return { kind: 'client', id: loaded.clients[0].id };
-    if (loaded.clients.length > 1)   return { kind: 'all' };
+    const loaded = loadStore();
+    if (loaded?.clients.length === 1) return { kind: 'client', id: loaded.clients[0].id };
     return { kind: 'all' };
   });
   const [tab, setTab] = useState('overview'); // overview | managers | positions | settings
@@ -1180,6 +1279,7 @@ export default function SOIDashboard() {
             <MenuItem active={tab==='managers' && !drilldownSoi} onClick={()=>navGo('managers')} icon={<Briefcase size={15}/>}>Managers</MenuItem>
             <MenuItem active={tab==='positions'} onClick={()=>navGo('positions')} icon={<Layers size={15}/>}>Positions</MenuItem>
             <MenuItem active={tab==='exposures'} onClick={()=>navGo('exposures')} icon={<PieIcon size={15}/>}>Exposures</MenuItem>
+            <MenuItem active={tab==='comparison'} onClick={()=>navGo('comparison')} icon={<Layers size={15}/>}>Compare Funds</MenuItem>
           </div>
 
           {/* ECONOMICS */}
@@ -1227,7 +1327,7 @@ export default function SOIDashboard() {
           </Panel>
         )}
 
-        {rollup.positionCount === 0 && (
+        {rollup.positionCount === 0 && !['comparison','economics'].includes(tab) && (
           <Panel className="p-12 text-center">
             <div className="text-sm" style={{ color: TEXT_DIM }}>No positions in this selection yet.</div>
             <button onClick={() => setImportOpen(true)}
@@ -1273,6 +1373,9 @@ export default function SOIDashboard() {
         )}
         {rollup.positionCount > 0 && tab === 'exposures' && (
           <ExposuresTab rollup={rollup} store={store} range={range} />
+        )}
+        {tab === 'comparison' && (
+          <FundComparisonTab store={store} selection={selection} />
         )}
         {tab === 'economics' && (
           <FundEconomicsTab rollup={rollup} store={store} selection={selection} />
@@ -1795,6 +1898,203 @@ function MiniSparkline({ series, width=120, height=32 }) {
     <svg width={width} height={height} style={{display:'block'}}>
       <polyline fill="none" stroke={color} strokeWidth="1.25" points={points} />
     </svg>
+  );
+}
+
+/* =============================================================================
+   FUND COMPARISON TAB — one holding across every fund
+   ============================================================================= */
+function FundComparisonTab({ store, selection }) {
+  // Default to the funds in the current selection; let the user narrow further.
+  const scopeSoiIds = useMemo(
+    () => getSelectedSOIs(store, selection).map(s => s.id),
+    [store, selection]
+  );
+  const [picked, setPicked] = useState(null); // null = all in scope
+  const [overlapOnly, setOverlapOnly] = useState(false);
+
+  const activeIds = picked ?? scopeSoiIds;
+  const cmp = useMemo(() => buildFundComparison(store, activeIds), [store, activeIds]);
+
+  const visibleRows = overlapOnly ? cmp.rows.filter(r => r.fundCount > 1) : cmp.rows;
+
+  const toggleFund = (id) => {
+    const base = picked ?? scopeSoiIds;
+    const next = base.includes(id) ? base.filter(x => x !== id) : [...base, id];
+    setPicked(next);
+  };
+
+  if (cmp.columns.length === 0) {
+    return (
+      <Panel className="p-12 text-center">
+        <div className="text-sm" style={{ color: TEXT_DIM }}>
+          No funds with holdings in this selection yet.
+        </div>
+        <div className="text-xs mt-1" style={{ color: TEXT_MUTE }}>
+          Import an SOI to start comparing holdings across funds.
+        </div>
+      </Panel>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Panel className="p-4">
+          <div className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Funds compared</div>
+          <div className="text-xl font-semibold mt-0.5">{cmp.columns.length}</div>
+        </Panel>
+        <Panel className="p-4">
+          <div className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Distinct holdings</div>
+          <div className="text-xl font-semibold mt-0.5">{cmp.rows.length}</div>
+        </Panel>
+        <Panel className="p-4">
+          <div className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Held by 2+ funds</div>
+          <div className="text-xl font-semibold mt-0.5" style={{ color: cmp.overlapCount ? GOLD : TEXT }}>
+            {cmp.overlapCount}
+          </div>
+        </Panel>
+        <Panel className="p-4">
+          <div className="text-[10px] uppercase tracking-wider" style={{ color: TEXT_MUTE }}>Overlapping exposure</div>
+          <div className="text-xl font-semibold mt-0.5">{fmtCurrency(cmp.overlapValue)}</div>
+          <div className="text-[10px] mt-0.5" style={{ color: TEXT_DIM }}>{fmtPct(cmp.overlapPct, 1)} of total</div>
+        </Panel>
+      </div>
+
+      {/* Double-count warning */}
+      {cmp.doubleCounted.length > 0 && (
+        <Panel className="p-3 flex items-start gap-2" style={{ borderColor: GOLD_44, backgroundColor: GOLD_11 }}>
+          <AlertCircle size={14} style={{ color: GOLD, flexShrink: 0, marginTop: 1 }} />
+          <div className="text-xs" style={{ color: TEXT_DIM }}>
+            {cmp.doubleCounted.map(d => (
+              <div key={d.fof}>
+                <span style={{ color: GOLD, fontWeight: 500 }}>{d.fof}</span> invests in {d.underlying.join(', ')} —
+                also shown separately. Row and column totals count that exposure twice.
+              </div>
+            ))}
+            <div className="mt-1" style={{ color: TEXT_MUTE }}>
+              Deselect either the fund-of-funds or its underlying funds for a net figure.
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {/* Fund pickers + filter */}
+      <Panel className="p-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] uppercase tracking-wider mr-1" style={{ color: TEXT_MUTE }}>Funds</span>
+          {getSelectedSOIs(store, selection).map(soi => {
+            const on = activeIds.includes(soi.id);
+            const mgr = store.managers.find(m => m.id === soi.managerId);
+            return (
+              <button key={soi.id} onClick={() => toggleFund(soi.id)}
+                className="px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1.5"
+                style={{
+                  backgroundColor: on ? ACCENT_22 : 'transparent',
+                  color: on ? ACCENT_2 : TEXT_DIM,
+                  border: `1px solid ${on ? ACCENT_44 : BORDER}`,
+                }}>
+                {mgr?.type === 'fund_of_funds' && (
+                  <span className="text-[8px] px-1 rounded" style={{ backgroundColor: ACCENT_33, color: ACCENT_2 }}>FoF</span>
+                )}
+                {fundLabelOf(soi)}
+              </button>
+            );
+          })}
+          <div className="flex-1" />
+          <button onClick={() => setOverlapOnly(v => !v)}
+            className="px-2 py-1 rounded text-[11px] font-medium"
+            style={{
+              backgroundColor: overlapOnly ? GOLD_22 : 'transparent',
+              color: overlapOnly ? GOLD : TEXT_DIM,
+              border: `1px solid ${overlapOnly ? GOLD_44 : BORDER}`,
+            }}>
+            Overlap only
+          </button>
+        </div>
+      </Panel>
+
+      {/* Matrix */}
+      <Panel className="p-0 overflow-hidden">
+        <div style={{ overflowX: 'auto' }}>
+          <table className="w-full text-xs" style={{ minWidth: 520 + cmp.columns.length * 130 }}>
+            <thead>
+              <tr style={{ backgroundColor: PANEL_2 }}>
+                <th className="text-left px-3 py-2.5 sticky left-0" style={{ color: TEXT_MUTE, backgroundColor: PANEL_2, minWidth: 190 }}>Holding</th>
+                <th className="text-left px-3 py-2.5" style={{ color: TEXT_MUTE }}>Sector</th>
+                <th className="text-center px-2 py-2.5" style={{ color: TEXT_MUTE }}>Funds</th>
+                {cmp.columns.map(c => (
+                  <th key={c.id} className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE, minWidth: 130 }}>
+                    <div className="flex items-center justify-end gap-1">
+                      {c.isFoF && <span className="text-[8px] px-1 rounded" style={{ backgroundColor: ACCENT_22, color: ACCENT_2 }}>FoF</span>}
+                      <span className="truncate">{c.label}</span>
+                    </div>
+                    <div className="text-[9px] font-normal truncate" style={{ color: TEXT_MUTE }}>{c.manager}</div>
+                  </th>
+                ))}
+                <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map(r => {
+                const shared = r.fundCount > 1;
+                return (
+                  <tr key={r.key} style={{ borderTop: `1px solid ${BORDER}`, backgroundColor: shared ? GOLD_11 : 'transparent' }}>
+                    <td className="px-3 py-2 sticky left-0" style={{ backgroundColor: shared ? PANEL_2 : PANEL }}>
+                      <div className="font-medium">{r.symbol || r.name}</div>
+                      {r.symbol && r.name !== r.symbol && (
+                        <div className="text-[10px] truncate" style={{ color: TEXT_MUTE, maxWidth: 170 }}>{r.name}</div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2"><SectorBadge sectorId={r.sectorId} /></td>
+                    <td className="px-2 py-2 text-center">
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                        style={{ backgroundColor: shared ? GOLD_22 : 'transparent', color: shared ? GOLD : TEXT_MUTE }}>
+                        {r.fundCount}
+                      </span>
+                    </td>
+                    {cmp.columns.map(c => {
+                      const v = r.values[c.id] || 0;
+                      return (
+                        <td key={c.id} className="px-3 py-2 text-right"
+                          style={{ color: v > 0 ? TEXT : TEXT_MUTE }}>
+                          {v > 0 ? (
+                            <>
+                              <div>{fmtCurrency(v)}</div>
+                              <div className="text-[9px]" style={{ color: TEXT_MUTE }}>
+                                {c.total > 0 ? fmtPct(v / c.total * 100, 1) : '–'}
+                              </div>
+                            </>
+                          ) : '—'}
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-2 text-right font-medium">{fmtCurrency(r.total)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop: `2px solid ${BORDER}`, backgroundColor: PANEL_2 }}>
+                <td className="px-3 py-2.5 font-semibold sticky left-0" style={{ backgroundColor: PANEL_2 }}>Total</td>
+                <td colSpan={2} />
+                {cmp.columns.map(c => (
+                  <td key={c.id} className="px-3 py-2.5 text-right font-semibold">{fmtCurrency(c.total)}</td>
+                ))}
+                <td className="px-3 py-2.5 text-right font-semibold">{fmtCurrency(cmp.grandTotal)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </Panel>
+
+      <div className="text-[10px] leading-relaxed" style={{ color: TEXT_MUTE }}>
+        Fund-of-funds columns are looked through to their underlying funds and scaled by the FoF's
+        ownership of each (called capital ÷ underlying NAV), so they are comparable to direct funds.
+        Highlighted rows are held by more than one fund — that overlap is your true concentration.
+      </div>
+    </div>
   );
 }
 
