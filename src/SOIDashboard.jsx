@@ -1078,6 +1078,7 @@ export default function SOIDashboard() {
 
   // Import wizard state
   const [importOpen, setImportOpen] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   // Settings drawer
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1247,6 +1248,11 @@ export default function SOIDashboard() {
               <RefreshCw size={12} className={priceLoading ? 'animate-spin' : ''} />
               {priceLoading ? 'Fetching…' : 'Refresh'}
             </button>
+            <button onClick={() => setQuickAddOpen(true)}
+              className="px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5"
+              style={{ border: `1px solid ${BORDER}`, color: TEXT, backgroundColor: PANEL_2 }}>
+              <Plus size={12}/> New
+            </button>
             <button onClick={() => setImportOpen(true)}
               className="px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5"
               style={{ backgroundColor: ACCENT, color: BG }}>
@@ -1327,7 +1333,7 @@ export default function SOIDashboard() {
           </Panel>
         )}
 
-        {rollup.positionCount === 0 && !['comparison','economics'].includes(tab) && (
+        {rollup.positionCount === 0 && !['comparison','economics','managers'].includes(tab) && (
           <Panel className="p-12 text-center">
             <div className="text-sm" style={{ color: TEXT_DIM }}>No positions in this selection yet.</div>
             <button onClick={() => setImportOpen(true)}
@@ -1346,12 +1352,12 @@ export default function SOIDashboard() {
             onTokenClick={setSelectedToken}
             clientShareMode={clientShareMode} scaleBy={scaleBy} />
         )}
-        {rollup.positionCount > 0 && tab === 'managers' && !drilldownSoi && (
-          <ManagersTab rollup={rollup} store={store} onDrill={(soiId) => setDrilldownSoi(soiId)}
+        {tab === 'managers' && !drilldownSoi && (
+          <ManagersTab rollup={rollup} store={store} selection={selection} onDrill={(soiId) => setDrilldownSoi(soiId)}
             priceHistory={priceHistory} range={range} apiKey={store.settings.cgApiKey}
             clientShareMode={clientShareMode} scaleBy={scaleBy} />
         )}
-        {rollup.positionCount > 0 && tab === 'managers' && drilldownSoi && (
+        {tab === 'managers' && drilldownSoi && (
           <SOIDetail
             store={store}
             soiId={drilldownSoi}
@@ -1382,6 +1388,15 @@ export default function SOIDashboard() {
         )}
       </div>{/* end main content */}
       </div>{/* end flex body */}
+
+      {quickAddOpen && (
+        <QuickAddModal
+          store={store}
+          updateStore={updateStore}
+          onClose={() => setQuickAddOpen(false)}
+          onCreatedFund={(soiId) => { setTab('managers'); setDrilldownSoi(soiId); }}
+        />
+      )}
 
       {importOpen && (
         <ImportWizard
@@ -2533,8 +2548,31 @@ function OverviewTab({ rollup, store, selection, priceHistory, historyLoading, h
 /* =============================================================================
    MANAGERS TAB — list of manager/vintage cards, click to drill into SOI detail
    ============================================================================= */
-function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clientShareMode, scaleBy }) {
+function ManagersTab({ rollup, store, selection, onDrill, priceHistory, range, apiKey, clientShareMode, scaleBy }) {
+  // Funds in scope that the rollup produced no rows for — an empty direct fund,
+  // or a fund-of-funds with no underlying funds linked yet. Without surfacing
+  // these there is no way to click into one to finish setting it up.
+  const unconfigured = useMemo(() => {
+    const represented = new Set(rollup.managerBreakdown.map(m => m.soiId));
+    return getSelectedSOIs(store, selection)
+      .filter(soi => !represented.has(soi.id))
+      .map(soi => {
+        const mgr = store.managers.find(m => m.id === soi.managerId);
+        const snap = latestSnapshot(soi);
+        const isFoF = mgr?.type === 'fund_of_funds';
+        return {
+          soi, mgr, isFoF,
+          reason: isFoF
+            ? ((snap?.subCommitments || []).length === 0
+                ? 'No underlying funds linked yet'
+                : 'Underlying funds have no holdings yet')
+            : 'No holdings imported yet',
+        };
+      });
+  }, [rollup.managerBreakdown, store, selection]);
+
   return (
+    <>
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       {rollup.managerBreakdown.map(m => {
         const soi = store.soIs.find(s => s.id === m.soiId);
@@ -2627,6 +2665,42 @@ function ManagersTab({ rollup, store, onDrill, priceHistory, range, apiKey, clie
         );
       })}
     </div>
+
+    {unconfigured.length > 0 && (
+      <div className="mt-4">
+        <div className="text-[10px] uppercase tracking-wider mb-2" style={{ color: TEXT_MUTE }}>
+          Needs setup ({unconfigured.length})
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {unconfigured.map(({ soi, mgr, isFoF, reason }) => (
+            <Panel key={soi.id} onClick={() => onDrill(soi.id)}
+              className="p-4 hover:cursor-pointer transition-colors"
+              style={{ borderStyle: 'dashed' }}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-semibold truncate">{mgr?.name || 'Unknown manager'}</span>
+                    {isFoF && (
+                      <span className="text-[9px] px-1 rounded flex-shrink-0"
+                        style={{ backgroundColor: ACCENT_22, color: ACCENT_2 }}>FoF</span>
+                    )}
+                  </div>
+                  <div className="text-[11px] mt-0.5" style={{ color: TEXT_DIM }}>{fundLabelOf(soi)}</div>
+                </div>
+                <ChevronRight size={14} style={{ color: TEXT_MUTE, flexShrink: 0 }} />
+              </div>
+              <div className="text-[11px] mt-2 flex items-center gap-1.5" style={{ color: GOLD }}>
+                <AlertCircle size={11} /> {reason}
+              </div>
+              <div className="text-[10px] mt-1" style={{ color: TEXT_MUTE }}>
+                {isFoF ? 'Open to link its underlying funds.' : 'Open to import or add holdings.'}
+              </div>
+            </Panel>
+          ))}
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -2801,6 +2875,7 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
   const manager = store.managers.find(m => m.id === soi?.managerId);
   const [editingPosition, setEditingPosition] = useState(null); // {mode: 'add'|'edit', position?}
   const [updatingSOI, setUpdatingSOI] = useState(false);
+  const [addingSub, setAddingSub] = useState(false);
 
   const snaps = soi ? sortedSnapshots(soi) : [];
   const [selectedSnapId, setSelectedSnapId] = useState(() => latestSnapshot(soi)?.id ?? null);
@@ -3036,11 +3111,43 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
         const fofTotalCalled = _.sumBy(subCommitments, s => s.called || 0);
         return (
           <Panel className="p-5">
-            <div className="text-xs uppercase tracking-wider mb-3" style={{color:TEXT_MUTE}}>
-              Underlying Manager Commitments ({subCommitments.length})
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-xs uppercase tracking-wider" style={{color:TEXT_MUTE}}>
+                Underlying Manager Commitments ({subCommitments.length})
+              </div>
+              <button onClick={() => setAddingSub(true)}
+                className="px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1"
+                style={{backgroundColor: ACCENT_22, color: ACCENT_2, border: `1px solid ${ACCENT_44}`}}>
+                <Plus size={11}/> Link a fund
+              </button>
             </div>
+
+            {addingSub && (
+              <SubCommitmentForm
+                store={store}
+                excludeSoiIds={[soi.id, ...subCommitments.map(s => s.toSoiId)]}
+                onCancel={() => setAddingSub(false)}
+                onAdd={({ toSoiId, committed, called }) => {
+                  updateStore(s => ({
+                    ...s,
+                    soIs: s.soIs.map(x => x.id !== soi.id ? x : {
+                      ...x,
+                      snapshots: snapshotsOf(x).map(snap => snap.id !== selectedSnapId ? snap : {
+                        ...snap,
+                        subCommitments: [...(snap.subCommitments || []),
+                          { id: uid(), toSoiId, committed, called, distributions: 0 }],
+                      }),
+                    }),
+                  }));
+                  setAddingSub(false);
+                }}
+              />
+            )}
+
             {subCommitments.length === 0 ? (
-              <div className="text-sm" style={{color:TEXT_DIM}}>No sub-commitments in this snapshot.</div>
+              <div className="text-sm" style={{color:TEXT_DIM}}>
+                No underlying funds linked yet. Use “Link a fund” to build this fund-of-funds.
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -3052,6 +3159,7 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
                       <th className="text-right px-3 py-2">Distributions</th>
                       <th className="text-right px-3 py-2">Underlying NAV</th>
                       <th className="text-right px-3 py-2">FoF Share %</th>
+                      <th style={{width:32}} />
                     </tr>
                   </thead>
                   <tbody>
@@ -3076,6 +3184,23 @@ function SOIDetail({ store, soiId, livePrices, onBack, updateStore, priceHistory
                           <td className="px-3 py-2.5 text-right tabular-nums">{underlyingMV > 0 ? fmtCurrency(underlyingMV) : '—'}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums">
                             {fofSharePct != null ? <span style={{color: ACCENT_2}}>{fmtPct(fofSharePct, 2)}</span> : '—'}
+                          </td>
+                          <td className="px-1 py-2.5">
+                            <button
+                              onClick={() => updateStore(s => ({
+                                ...s,
+                                soIs: s.soIs.map(x => x.id !== soi.id ? x : {
+                                  ...x,
+                                  snapshots: snapshotsOf(x).map(snap => snap.id !== selectedSnapId ? snap : {
+                                    ...snap,
+                                    subCommitments: (snap.subCommitments || []).filter(sc => sc.id !== sub.id),
+                                  }),
+                                }),
+                              }))}
+                              title="Unlink this fund"
+                              className="p-1 rounded" style={{color: TEXT_MUTE}}>
+                              <X size={12}/>
+                            </button>
                           </td>
                         </tr>
                       );
@@ -3956,6 +4081,350 @@ function DropZone({ onFile, loading }) {
 /* =============================================================================
    SETTINGS DRAWER
    ============================================================================= */
+/* Defined at module scope on purpose: a component declared inside a render body
+   is a new type every render, so React unmounts and remounts its subtree and the
+   inputs lose focus after every keystroke. */
+const FormField = ({ label, children, hint }) => (
+  <div>
+    <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: TEXT_MUTE }}>{label}</div>
+    {children}
+    {hint && <div className="text-[10px] mt-1" style={{ color: TEXT_MUTE }}>{hint}</div>}
+  </div>
+);
+
+/* Inline row for linking an underlying fund into a fund-of-funds. */
+function SubCommitmentForm({ store, excludeSoiIds, onAdd, onCancel }) {
+  const managerById = Object.fromEntries(store.managers.map(m => [m.id, m]));
+  // A FoF can only hold direct funds — the rollup deliberately stops at one
+  // level of look-through, so offering nested FoFs here would create rows the
+  // engine silently skips.
+  const options = store.soIs.filter(s =>
+    !excludeSoiIds.includes(s.id) && managerById[s.managerId]?.type !== 'fund_of_funds'
+  );
+
+  const [toSoiId, setToSoiId] = useState(options[0]?.id || '');
+  const [committed, setCommitted] = useState('');
+  const [called, setCalled] = useState('');
+  const [error, setError] = useState('');
+
+  const inputStyle = { backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}` };
+  const target = store.soIs.find(s => s.id === toSoiId);
+  const targetMV = _.sumBy(latestSnapshot(target)?.positions || [], p => p.soiMarketValue || 0);
+  const calledNum = parseNum(called) || 0;
+  const sharePct = targetMV > 0 && calledNum > 0 ? (calledNum / targetMV) * 100 : null;
+
+  const submit = () => {
+    const committedNum = parseNum(committed) || 0;
+    if (!toSoiId) { setError('Pick a fund to link.'); return; }
+    if (calledNum <= 0) { setError('Called capital is what drives look-through — enter an amount.'); return; }
+    if (committedNum > 0 && calledNum > committedNum) { setError('Called cannot exceed committed.'); return; }
+    if (targetMV > 0 && calledNum > targetMV) {
+      setError(`Called (${fmtCurrency(calledNum)}) exceeds that fund's NAV (${fmtCurrency(targetMV)}) — it would imply owning more than 100%.`);
+      return;
+    }
+    onAdd({ toSoiId, committed: committedNum, called: calledNum });
+  };
+
+  if (options.length === 0) {
+    return (
+      <div className="mb-3 p-3 rounded text-xs" style={{ backgroundColor: PANEL_2, border: `1px dashed ${BORDER}`, color: TEXT_DIM }}>
+        No eligible funds to link. Create a direct manager's fund first — a fund-of-funds can only
+        hold direct funds, not another fund-of-funds.
+        <button onClick={onCancel} className="ml-2 underline" style={{ color: ACCENT_2 }}>Close</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-3 p-3 rounded space-y-2" style={{ backgroundColor: PANEL_2, border: `1px solid ${ACCENT_44}` }}>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="col-span-3">
+          <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: TEXT_MUTE }}>Underlying fund</div>
+          <select value={toSoiId} onChange={e => { setToSoiId(e.target.value); setError(''); }}
+            className="w-full px-2 py-1.5 rounded text-xs outline-none" style={inputStyle}>
+            {options.map(s => (
+              <option key={s.id} value={s.id}>
+                {managerById[s.managerId]?.name || '?'} — {fundLabelOf(s)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: TEXT_MUTE }}>Committed</div>
+          <input value={committed} onChange={e => { setCommitted(e.target.value); setError(''); }} placeholder="5,000,000"
+            className="w-full px-2 py-1.5 rounded text-xs outline-none" style={inputStyle} />
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: TEXT_MUTE }}>Called</div>
+          <input value={called} onChange={e => { setCalled(e.target.value); setError(''); }} placeholder="3,500,000"
+            className="w-full px-2 py-1.5 rounded text-xs outline-none" style={inputStyle} />
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: TEXT_MUTE }}>Resulting share</div>
+          <div className="px-2 py-1.5 text-xs" style={{ color: sharePct != null ? ACCENT_2 : TEXT_MUTE }}>
+            {sharePct != null ? fmtPct(sharePct, 2) : targetMV > 0 ? '—' : 'fund has no NAV'}
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <div className="text-[11px] flex items-start gap-1.5" style={{ color: RED }}>
+          <AlertCircle size={11} style={{ flexShrink: 0, marginTop: 1 }} /> {error}
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <button onClick={onCancel} className="px-2 py-1 rounded text-[11px]"
+          style={{ color: TEXT_DIM, border: `1px solid ${BORDER}` }}>Cancel</button>
+        <button onClick={submit} className="px-2 py-1 rounded text-[11px] font-medium"
+          style={{ backgroundColor: ACCENT, color: BG }}>Link fund</button>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================================
+   QUICK ADD — create a portfolio, manager, or fund without the import wizard
+   ============================================================================= */
+function QuickAddModal({ store, updateStore, onClose, onCreatedFund }) {
+  const [kind, setKind] = useState(store.clients.length === 0 ? 'portfolio' : 'manager');
+
+  // Portfolio
+  const [clientName, setClientName] = useState('');
+  // Manager
+  const [mgrName, setMgrName] = useState('');
+  const [mgrFirm, setMgrFirm] = useState('');
+  const [mgrType, setMgrType] = useState('direct');
+  // Fund
+  const [fundMgrId, setFundMgrId] = useState(store.managers[0]?.id || '');
+  const [fundName, setFundName] = useState('');
+  const [asOfDate, setAsOfDate] = useState(today());
+  const [linkClientId, setLinkClientId] = useState(store.clients[0]?.id || '');
+  const [committed, setCommitted] = useState('');
+  const [called, setCalled] = useState('');
+
+  const [error, setError] = useState('');
+
+  const canSave =
+    kind === 'portfolio' ? clientName.trim().length > 0 :
+    kind === 'manager'   ? mgrName.trim().length > 0 :
+                           fundMgrId && fundName.trim().length > 0;
+
+  const save = () => {
+    setError('');
+    if (kind === 'portfolio') {
+      const id = uid();
+      updateStore(s => ({ ...s, clients: [...s.clients, { id, name: clientName.trim(), notes: '' }] }));
+      onClose();
+      return;
+    }
+
+    if (kind === 'manager') {
+      const id = uid();
+      updateStore(s => ({
+        ...s,
+        managers: [...s.managers, { id, name: mgrName.trim(), firm: mgrFirm.trim(), type: mgrType }],
+      }));
+      onClose();
+      return;
+    }
+
+    // Fund
+    const soiId = uid();
+    const snapId = uid();
+    const committedNum = parseNum(committed) || 0;
+    const calledNum = parseNum(called) || 0;
+    if (calledNum > committedNum && committedNum > 0) {
+      setError('Called capital cannot exceed committed.');
+      return;
+    }
+
+    updateStore(s => {
+      const next = {
+        ...s,
+        soIs: [...s.soIs, {
+          id: soiId,
+          managerId: fundMgrId,
+          vintage: fundName.trim(),
+          fundName: fundName.trim(),
+          snapshots: [{ id: snapId, asOfDate, notes: '', positions: [], subCommitments: [] }],
+        }],
+      };
+      if (linkClientId && committedNum > 0) {
+        next.commitments = [...s.commitments, {
+          id: uid(), clientId: linkClientId, managerId: fundMgrId, soiId,
+          committed: committedNum, called: calledNum, distributions: 0,
+        }];
+      }
+      return next;
+    });
+    onClose();
+    onCreatedFund?.(soiId);
+  };
+
+  const selectedMgr = store.managers.find(m => m.id === fundMgrId);
+  const inputStyle = { backgroundColor: PANEL_2, color: TEXT, border: `1px solid ${BORDER}` };
+  const Field = FormField;
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.5)' }} />
+      <div style={{
+        position: 'fixed', zIndex: 201, top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+        width: 440, maxHeight: '85vh', overflowY: 'auto',
+        backgroundColor: PANEL, border: `1px solid ${BORDER}`, borderRadius: 10,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+      }}>
+        <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: `1px solid ${BORDER}` }}>
+          <div className="text-sm font-semibold">Add new</div>
+          <button onClick={onClose} className="p-1 rounded" style={{ color: TEXT_DIM }}><X size={16} /></button>
+        </div>
+
+        {/* Kind switch */}
+        <div className="flex gap-1 px-5 pt-4">
+          {[
+            { id: 'portfolio', label: 'Portfolio' },
+            { id: 'manager',   label: 'Manager' },
+            { id: 'fund',      label: 'Fund' },
+          ].map(k => (
+            <button key={k.id} onClick={() => { setKind(k.id); setError(''); }}
+              className="px-3 py-1.5 rounded text-xs font-medium flex-1"
+              style={{
+                backgroundColor: kind === k.id ? ACCENT : PANEL_2,
+                color: kind === k.id ? BG : TEXT_DIM,
+                border: `1px solid ${kind === k.id ? ACCENT : BORDER}`,
+              }}>
+              {k.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
+          {kind === 'portfolio' && (
+            <Field label="Portfolio name" hint="A client or mandate you are monitoring.">
+              <input autoFocus value={clientName} onChange={e => setClientName(e.target.value)}
+                placeholder="e.g. Whitfield Family Office"
+                className="w-full px-3 py-2 rounded text-sm outline-none" style={inputStyle} />
+            </Field>
+          )}
+
+          {kind === 'manager' && (
+            <>
+              <Field label="Manager name">
+                <input autoFocus value={mgrName} onChange={e => setMgrName(e.target.value)}
+                  placeholder="e.g. Meridian Digital Capital"
+                  className="w-full px-3 py-2 rounded text-sm outline-none" style={inputStyle} />
+              </Field>
+              <Field label="Firm (optional)">
+                <input value={mgrFirm} onChange={e => setMgrFirm(e.target.value)} placeholder="Short name"
+                  className="w-full px-3 py-2 rounded text-sm outline-none" style={inputStyle} />
+              </Field>
+              <Field label="Type" hint={mgrType === 'fund_of_funds'
+                ? 'Holds commitments to other funds; you will link those on the fund page.'
+                : 'Holds tokens and positions directly.'}>
+                <div className="flex gap-2">
+                  {[
+                    { id: 'direct', label: 'Direct' },
+                    { id: 'fund_of_funds', label: 'Fund of funds' },
+                  ].map(t => (
+                    <button key={t.id} onClick={() => setMgrType(t.id)}
+                      className="px-3 py-1.5 rounded text-xs font-medium flex-1"
+                      style={{
+                        backgroundColor: mgrType === t.id ? ACCENT_22 : PANEL_2,
+                        color: mgrType === t.id ? ACCENT_2 : TEXT_DIM,
+                        border: `1px solid ${mgrType === t.id ? ACCENT_44 : BORDER}`,
+                      }}>
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            </>
+          )}
+
+          {kind === 'fund' && (
+            <>
+              {store.managers.length === 0 ? (
+                <div className="text-xs p-3 rounded" style={{ backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px dashed ${BORDER}` }}>
+                  Add a manager first — a fund belongs to one.
+                </div>
+              ) : (
+                <>
+                  <Field label="Manager">
+                    <select value={fundMgrId} onChange={e => setFundMgrId(e.target.value)}
+                      className="w-full px-3 py-2 rounded text-sm outline-none" style={inputStyle}>
+                      {store.managers.map(m => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}{m.type === 'fund_of_funds' ? ' (FoF)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Fund name">
+                    <input autoFocus value={fundName} onChange={e => setFundName(e.target.value)}
+                      placeholder="e.g. Fund III"
+                      className="w-full px-3 py-2 rounded text-sm outline-none" style={inputStyle} />
+                  </Field>
+                  <Field label="Statement date">
+                    <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)}
+                      className="w-full px-3 py-2 rounded text-sm outline-none" style={inputStyle} />
+                  </Field>
+
+                  {store.clients.length > 0 && (
+                    <div className="pt-2 space-y-3" style={{ borderTop: `1px solid ${BORDER}` }}>
+                      <div className="text-[10px] uppercase tracking-wider pt-1" style={{ color: TEXT_MUTE }}>
+                        Commitment (optional)
+                      </div>
+                      <Field label="Portfolio">
+                        <select value={linkClientId} onChange={e => setLinkClientId(e.target.value)}
+                          className="w-full px-3 py-2 rounded text-sm outline-none" style={inputStyle}>
+                          {store.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      </Field>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Field label="Committed">
+                          <input value={committed} onChange={e => setCommitted(e.target.value)} placeholder="5,000,000"
+                            className="w-full px-3 py-2 rounded text-sm outline-none" style={inputStyle} />
+                        </Field>
+                        <Field label="Called">
+                          <input value={called} onChange={e => setCalled(e.target.value)} placeholder="3,500,000"
+                            className="w-full px-3 py-2 rounded text-sm outline-none" style={inputStyle} />
+                        </Field>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="text-[10px] p-2.5 rounded" style={{ backgroundColor: PANEL_2, color: TEXT_MUTE }}>
+                    {selectedMgr?.type === 'fund_of_funds'
+                      ? 'Fund-of-funds: after creating it, open the fund and link its underlying funds.'
+                      : 'Holdings come from Import — this creates the empty fund to import into.'}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {error && (
+            <div className="text-xs flex items-center gap-1.5" style={{ color: RED }}>
+              <AlertCircle size={12} /> {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 px-5 py-3" style={{ borderTop: `1px solid ${BORDER}` }}>
+          <button onClick={onClose} className="px-3 py-1.5 rounded text-xs"
+            style={{ color: TEXT_DIM, border: `1px solid ${BORDER}` }}>Cancel</button>
+          <button onClick={save} disabled={!canSave}
+            className="px-3 py-1.5 rounded text-xs font-medium"
+            style={{ backgroundColor: canSave ? ACCENT : PANEL_2, color: canSave ? BG : TEXT_MUTE, opacity: canSave ? 1 : 0.6 }}>
+            Create
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* =============================================================================
    TOKEN DETAIL DRAWER
    ============================================================================= */
