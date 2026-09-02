@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import _ from 'lodash';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, LineChart, Line, ReferenceLine, ReferenceArea } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, LineChart, Line, ReferenceLine, ReferenceArea, Sankey, Layer, Rectangle } from 'recharts';
 import { Upload, RefreshCw, AlertCircle, Layers, Search, Lock, ArrowLeft, FileSpreadsheet, Activity, Plus, Settings, Download, Trash2, Users, Briefcase, Building2, ChevronDown, ChevronRight, Edit2, X, Check, Eye, EyeOff, TrendingUp, DollarSign, PieChart as PieIcon, LayoutDashboard } from 'lucide-react';
 import { BG, PANEL, PANEL_2, BORDER, TEXT, TEXT_DIM, TEXT_MUTE, ACCENT, ACCENT_2, GREEN, RED, GOLD, VIOLET,
          ACCENT_11, ACCENT_22, ACCENT_44, GREEN_22, GREEN_44, RED_44, RED_66, GOLD_11, GOLD_22, GOLD_44, VIOLET_11, VIOLET_22, VIOLET_33, VIOLET_44 } from './lib/theme.js';
@@ -1077,10 +1077,23 @@ export default function SOIDashboard() {
 
   const navGo = (t) => { setTab(t); setDrilldownSoi(null); };
 
+  // The sidebar sticks directly below the top bar, so it needs the bar's real
+  // height — which varies with font metrics and can't be hardcoded.
+  const topBarRef = useRef(null);
+  const [topBarH, setTopBarH] = useState(60);
+  useEffect(() => {
+    const el = topBarRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setTopBarH(el.offsetHeight));
+    ro.observe(el);
+    setTopBarH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <div style={containerStyle}>
       {/* ========= TOP BAR ========= */}
-      <div style={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: PANEL, position: 'sticky', top: 0, zIndex: 50 }}>
+      <div ref={topBarRef} style={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: PANEL, position: 'sticky', top: 0, zIndex: 50 }}>
         <div className="px-4 py-3 flex items-center gap-4">
           {/* Chain-link logo */}
           <div className="flex items-center gap-2.5 flex-shrink-0">
@@ -1152,11 +1165,11 @@ export default function SOIDashboard() {
       </div>
 
       {/* ========= BODY (sidebar + main) ========= */}
-      <div className="flex" style={{ minHeight: 'calc(100vh - 57px)' }}>
+      <div className="flex" style={{ minHeight: `calc(100vh - ${topBarH}px)` }}>
 
         {/* ========= LEFT SIDEBAR ========= */}
         <div className="flex-shrink-0 w-[220px] flex flex-col py-4 gap-1"
-          style={{ backgroundColor: PANEL, borderRight: `1px solid ${BORDER}`, position: 'sticky', top: 57, height: 'calc(100vh - 57px)', overflowY: 'auto' }}>
+          style={{ backgroundColor: PANEL, borderRight: `1px solid ${BORDER}`, position: 'sticky', top: topBarH, height: `calc(100vh - ${topBarH}px)`, overflowY: 'auto' }}>
 
           {/* OVERVIEW */}
           <div className="px-4 pb-1">
@@ -1415,6 +1428,141 @@ function PortfolioSelector({ store, selection, onChange }) {
      apiKey: for gating UI
      height, compact: style controls
    ============================================================================= */
+/* =============================================================================
+   CAPITAL FLOW SANKEY — Portfolio → Manager/Fund → Sector
+   Shows where committed capital actually lands, by dollar weight.
+   ============================================================================= */
+function SankeyNode({ x, y, width, height, index, payload }) {
+  const isLeft = payload.depth === 0;
+  return (
+    <Layer key={`node-${index}`}>
+      <Rectangle x={x} y={y} width={width} height={height}
+        fill={payload.color || ACCENT} fillOpacity={0.9} radius={2} />
+      {height > 12 && (
+        <text x={isLeft ? x + width + 6 : x - 6} y={y + height / 2}
+          textAnchor={isLeft ? 'start' : 'end'} dominantBaseline="middle"
+          fontSize={10} fill={TEXT}>
+          {payload.name}
+        </text>
+      )}
+    </Layer>
+  );
+}
+
+function CapitalFlowSankey({ rollup, store, height = 340 }) {
+  const data = useMemo(() => {
+    const nodes = [];
+    const links = [];
+    const idx = new Map();
+    const addNode = (name, color) => {
+      if (idx.has(name)) return idx.get(name);
+      idx.set(name, nodes.length);
+      nodes.push({ name, color });
+      return nodes.length - 1;
+    };
+
+    // Depth 0: managers. Depth 1: sectors. Value = current position value.
+    const flows = new Map();
+    for (const t of (rollup.tokenRollup || [])) {
+      const sec = sectorOf(t.sectorId);
+      for (const p of (t.positions || [])) {
+        const mgr = p.managerName || 'Unknown manager';
+        const key = `${mgr} ${sec.label}`;
+        const prev = flows.get(key) || { mgr, sec, value: 0 };
+        prev.value += p.currentValue || 0;
+        flows.set(key, prev);
+      }
+    }
+
+    // Sankey assigns node depth from index order, so every manager must be
+    // registered before any sector — otherwise the columns interleave.
+    for (const { mgr } of flows.values()) addNode(mgr, ACCENT);
+    for (const { sec } of flows.values()) addNode(sec.label, sec.color);
+
+    for (const { mgr, sec, value } of flows.values()) {
+      if (value <= 0) continue;
+      links.push({ source: addNode(mgr, ACCENT), target: addNode(sec.label, sec.color), value });
+    }
+
+    return { nodes, links };
+  }, [rollup.tokenRollup]);
+
+  if (data.links.length === 0) {
+    return (
+      <Panel className="p-5">
+        <div className="text-sm font-semibold mb-1">Capital Flow</div>
+        <div className="flex items-center justify-center text-xs" style={{ height, color: TEXT_MUTE }}>
+          No position data to chart yet.
+        </div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel className="p-5">
+      <div className="text-sm font-semibold">Capital Flow</div>
+      <div className="text-xs mb-3" style={{ color: TEXT_MUTE }}>
+        Manager → sector, weighted by current position value
+      </div>
+      <div style={{ width: '100%', height }}>
+        <ResponsiveContainer>
+          <Sankey data={data} nodePadding={18} nodeWidth={10}
+            margin={{ top: 8, right: 140, bottom: 8, left: 8 }}
+            node={<SankeyNode />}
+            link={{ stroke: ACCENT, strokeOpacity: 0.18 }}>
+            <Tooltip
+              contentStyle={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, borderRadius: 6, fontSize: 12 }}
+              labelStyle={{ color: TEXT_DIM }} itemStyle={{ color: TEXT }}
+              formatter={(v) => fmtCurrency(v)} />
+          </Sankey>
+        </ResponsiveContainer>
+      </div>
+    </Panel>
+  );
+}
+
+/* Shimmering skeleton shown while price history is being fetched.
+   Mirrors the real chart's shape (grid + area silhouette) so the layout doesn't jump. */
+function ChartSkeleton({ height = 260, progress }) {
+  const bars = [42, 58, 51, 67, 61, 74, 69, 82, 76, 88, 81, 94];
+  return (
+    <div className="catena-shimmer rounded relative"
+      style={{ height, backgroundColor: PANEL_2, border: `1px solid ${BORDER}` }}>
+      {/* horizontal grid lines */}
+      <div className="absolute inset-0 flex flex-col justify-between py-4 px-4">
+        {[0,1,2,3,4].map(i => (
+          <div key={i} style={{ height: 1, backgroundColor: BORDER, opacity: 0.5 }} />
+        ))}
+      </div>
+
+      {/* area silhouette */}
+      <div className="absolute inset-x-4 bottom-8 top-8 flex items-end gap-[3px]">
+        {bars.map((h, i) => (
+          <div key={i} className="catena-pulse flex-1 rounded-t"
+            style={{
+              height: `${h}%`,
+              backgroundColor: ACCENT,
+              animationDelay: `${i * 90}ms`,
+            }} />
+        ))}
+      </div>
+
+      {/* progress readout */}
+      {progress?.total > 0 && (
+        <div className="absolute inset-x-0 bottom-3 flex flex-col items-center gap-1.5">
+          <div className="text-[10px] font-medium" style={{ color: TEXT_DIM }}>
+            Loading {progress.current}/{progress.total}{progress.token ? ` — ${progress.token}` : ''}
+          </div>
+          <div className="w-40 h-1 rounded-full overflow-hidden" style={{ backgroundColor: BORDER }}>
+            <div className="h-full transition-all duration-300"
+              style={{ width: `${(progress.current / Math.max(1, progress.total)) * 100}%`, backgroundColor: ACCENT }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, historyProgress, range, onRangeChange, onRequestFetch, apiKey, height=260, compact=false, title }) {
   const tokenIds = useMemo(() => {
     const ids = new Set();
@@ -1441,8 +1589,32 @@ function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, h
   // Derive asOfMs from latestSnapshotMs for badge display
   const asOfMs = latestSnapshotMs;
 
-  const startValue = series[0]?.value ?? 0;
-  const endValue = series[series.length - 1]?.value ?? 0;
+  // --- Drag-to-zoom -----------------------------------------------------------
+  // dragStart/dragEnd track the in-progress selection; zoom holds the committed one.
+  const [dragStart, setDragStart] = useState(null);
+  const [dragEnd, setDragEnd] = useState(null);
+  const [zoom, setZoom] = useState(null); // { x1, x2 } in epoch ms
+
+  // A range-pill change invalidates any zoom — the underlying window moved.
+  useEffect(() => { setZoom(null); setDragStart(null); setDragEnd(null); }, [range]);
+
+  const commitZoom = () => {
+    if (dragStart == null || dragEnd == null || dragStart === dragEnd) {
+      setDragStart(null); setDragEnd(null); return;
+    }
+    const [x1, x2] = dragStart < dragEnd ? [dragStart, dragEnd] : [dragEnd, dragStart];
+    // Ignore hair-trigger drags that would zoom to a sliver.
+    if (series.filter(s => s.date >= x1 && s.date <= x2).length >= 2) setZoom({ x1, x2 });
+    setDragStart(null); setDragEnd(null);
+  };
+
+  const visibleSeries = useMemo(
+    () => zoom ? series.filter(s => s.date >= zoom.x1 && s.date <= zoom.x2) : series,
+    [series, zoom]
+  );
+
+  const startValue = visibleSeries[0]?.value ?? 0;
+  const endValue = visibleSeries[visibleSeries.length - 1]?.value ?? 0;
   const returnPct = startValue > 0 ? ((endValue - startValue) / startValue) * 100 : 0;
   const positive = returnPct >= 0;
   const lineColor = positive ? GREEN : RED;
@@ -1451,17 +1623,17 @@ function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, h
   const needsData = apiKey && tokenIds.length > 0 && tokensCovered < tokenIds.length;
 
   const yMin = useMemo(() => {
-    const vals = series.map(s => s.value).filter(v => v > 0);
+    const vals = visibleSeries.map(s => s.value).filter(v => v > 0);
     if (!vals.length) return 0;
     const min = Math.min(...vals), max = Math.max(...vals);
     return Math.max(0, min - (max - min) * 0.1);
-  }, [series]);
+  }, [visibleSeries]);
   const yMax = useMemo(() => {
-    const vals = series.map(s => s.value).filter(v => v > 0);
+    const vals = visibleSeries.map(s => s.value).filter(v => v > 0);
     if (!vals.length) return 1;
     const min = Math.min(...vals), max = Math.max(...vals);
     return max + (max - min) * 0.1;
-  }, [series]);
+  }, [visibleSeries]);
 
   return (
     <Panel className={compact ? 'p-3' : 'p-5'}>
@@ -1482,13 +1654,18 @@ function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, h
               )}
             </div>
           </div>
-          {onRangeChange && (
-            <div className="flex items-center gap-1">
-              {RANGES.map(r => (
-                <Pill key={r.id} active={range===r.id} onClick={()=>onRangeChange(r.id)}>{r.label}</Pill>
-              ))}
-            </div>
-          )}
+          <div className="flex items-center gap-1">
+            {zoom && (
+              <button onClick={() => setZoom(null)}
+                className="px-2 py-1 rounded text-[10px] font-medium flex items-center gap-1 mr-1"
+                style={{ backgroundColor: ACCENT_22, color: ACCENT_2, border: `1px solid ${ACCENT_44}` }}>
+                <X size={10}/> Reset zoom
+              </button>
+            )}
+            {onRangeChange && RANGES.map(r => (
+              <Pill key={r.id} active={range===r.id} onClick={()=>onRangeChange(r.id)}>{r.label}</Pill>
+            ))}
+          </div>
         </div>
       )}
       {!compact && snapshotDates && snapshotDates.length > 1 && (
@@ -1507,15 +1684,7 @@ function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, h
       )}
 
       {apiKey && historyLoading && (
-        <div className="flex flex-col items-center justify-center text-xs rounded gap-2"
-          style={{backgroundColor: PANEL_2, color: TEXT_DIM, border: `1px dashed ${BORDER}`, height}}>
-          <RefreshCw size={16} className="animate-spin" style={{color:ACCENT}} />
-          <div>Fetching history {historyProgress.current}/{historyProgress.total} — {historyProgress.token}</div>
-          <div className="w-40 h-1 rounded-full overflow-hidden" style={{backgroundColor: BORDER}}>
-            <div className="h-full" style={{width: `${(historyProgress.current/Math.max(1,historyProgress.total))*100}%`, backgroundColor: ACCENT}} />
-          </div>
-          <div className="text-[10px]" style={{color:TEXT_MUTE}}>~2s per token on Demo tier</div>
-        </div>
+        <ChartSkeleton height={height} progress={historyProgress} />
       )}
 
       {apiKey && !historyLoading && needsData && (
@@ -1528,12 +1697,25 @@ function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, h
       {apiKey && !historyLoading && !needsData && series.length > 0 && (
         <div style={{width:'100%', height}}>
           <ResponsiveContainer>
-            <AreaChart data={series} margin={{top: 8, right: 8, left: 0, bottom: 0}}>
+            <AreaChart data={visibleSeries} margin={{top: 8, right: 8, left: 0, bottom: 0}}
+              onMouseDown={(e) => e?.activeLabel != null && (setDragStart(e.activeLabel), setDragEnd(e.activeLabel))}
+              onMouseMove={(e) => dragStart != null && e?.activeLabel != null && setDragEnd(e.activeLabel)}
+              onMouseUp={commitZoom}
+              onMouseLeave={() => { setDragStart(null); setDragEnd(null); }}
+              style={{ cursor: dragStart != null ? 'ew-resize' : 'crosshair', userSelect: 'none' }}>
               <defs>
                 <linearGradient id={`grad-${positive?'up':'down'}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={lineColor} stopOpacity={0.35}/>
-                  <stop offset="100%" stopColor={lineColor} stopOpacity={0}/>
+                  <stop offset="0%"   stopColor={lineColor} stopOpacity={0.45}/>
+                  <stop offset="45%"  stopColor={lineColor} stopOpacity={0.15}/>
+                  <stop offset="100%" stopColor={lineColor} stopOpacity={0.02}/>
                 </linearGradient>
+                <filter id={`glow-${positive?'up':'down'}`} x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="2.5" result="blur"/>
+                  <feMerge>
+                    <feMergeNode in="blur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
               </defs>
               <XAxis dataKey="date" tick={{fontSize: 10, fill: TEXT_MUTE}} axisLine={false} tickLine={false}
                 tickFormatter={(ms) => {
@@ -1551,29 +1733,43 @@ function PerformanceChart({ soiBundles, scaleFn, priceHistory, historyLoading, h
                 itemStyle={{color: TEXT}}
                 labelFormatter={(ms) => new Date(ms).toLocaleDateString([], {year:'numeric', month: 'short', day: 'numeric'})}
                 formatter={(v) => [fmtCurrency(v), 'NAV']} />
-              <Area type="monotone" dataKey="value" stroke={lineColor} strokeWidth={1.5}
-                fill={`url(#grad-${positive?'up':'down'})`} />
+              <Area type="monotone" dataKey="value" stroke={lineColor} strokeWidth={2}
+                fill={`url(#grad-${positive?'up':'down'})`}
+                style={{ filter: `url(#glow-${positive?'up':'down'})` }}
+                activeDot={{ r: 4, fill: lineColor, stroke: PANEL, strokeWidth: 2 }} />
               {/* Backward-simulated (before earliest snapshot) */}
-              {earliestSnapshotMs && series.length > 0 && earliestSnapshotMs > series[0].date && (
+              {earliestSnapshotMs && visibleSeries.length > 0 && earliestSnapshotMs > visibleSeries[0].date && (
                 <ReferenceArea
-                  x1={series[0].date}
-                  x2={Math.min(earliestSnapshotMs, series[series.length-1].date)}
+                  x1={visibleSeries[0].date}
+                  x2={Math.min(earliestSnapshotMs, visibleSeries[visibleSeries.length-1].date)}
                   fill={TEXT_MUTE} fillOpacity={0.12} stroke="none" />
               )}
               {/* Forward-simulated (after latest snapshot) */}
-              {latestSnapshotMs && series.length > 0 && latestSnapshotMs < series[series.length-1].date && (
+              {latestSnapshotMs && visibleSeries.length > 0 && latestSnapshotMs < visibleSeries[visibleSeries.length-1].date && (
                 <ReferenceArea
-                  x1={Math.max(latestSnapshotMs, series[0].date)}
-                  x2={series[series.length-1].date}
+                  x1={Math.max(latestSnapshotMs, visibleSeries[0].date)}
+                  x2={visibleSeries[visibleSeries.length-1].date}
                   fill={GOLD} fillOpacity={0.08} stroke="none" />
               )}
               {/* Snapshot date markers */}
-              {(snapshotDates||[]).filter(ms => series.length > 0 && ms >= series[0].date && ms <= series[series.length-1].date).map((ms,i) => (
+              {(snapshotDates||[]).filter(ms => visibleSeries.length > 0 && ms >= visibleSeries[0].date && ms <= visibleSeries[visibleSeries.length-1].date).map((ms,i) => (
                 <ReferenceLine key={i} x={ms} stroke={GOLD} strokeWidth={1} strokeDasharray="3 3"
                   label={{ value: new Date(ms).toLocaleDateString([],{month:'short',year:'2-digit'}), position:'top', fill:GOLD, fontSize:9 }} />
               ))}
+              {/* Live drag selection */}
+              {dragStart != null && dragEnd != null && dragStart !== dragEnd && (
+                <ReferenceArea x1={Math.min(dragStart, dragEnd)} x2={Math.max(dragStart, dragEnd)}
+                  fill={ACCENT} fillOpacity={0.18} stroke={ACCENT} strokeOpacity={0.5} strokeWidth={1} />
+              )}
             </AreaChart>
           </ResponsiveContainer>
+          {!compact && (
+            <div className="text-[10px] mt-1.5 text-center" style={{ color: TEXT_MUTE }}>
+              {zoom
+                ? `Zoomed: ${new Date(zoom.x1).toLocaleDateString()} – ${new Date(zoom.x2).toLocaleDateString()}`
+                : 'Click and drag on the chart to zoom into a range'}
+            </div>
+          )}
         </div>
       )}
 
@@ -1612,18 +1808,10 @@ function MiniSparkline({ series, width=120, height=32 }) {
    EXPOSURES TAB — sector / concentration breakdown (delegates to OverviewTab charts)
    ============================================================================= */
 function ExposuresTab({ rollup, store, range }) {
-  const sectors = useMemo(() => {
-    const map = {};
-    for (const t of rollup.tokens) {
-      const s = sectorOf(t.sectorId);
-      if (!map[s.id]) map[s.id] = { ...s, value: 0, count: 0 };
-      map[s.id].value += t.totalValue;
-      map[s.id].count += 1;
-    }
-    return Object.values(map).sort((a, b) => b.value - a.value);
-  }, [rollup.tokens]);
-
-  const totalValue = rollup.totalValue || 0;
+  const sectors = useMemo(
+    () => (rollup.sectorBreakdown || []).filter(s => s.value > 0).sort((a, b) => b.value - a.value),
+    [rollup.sectorBreakdown]
+  );
 
   return (
     <div className="space-y-6">
@@ -1632,14 +1820,20 @@ function ExposuresTab({ rollup, store, range }) {
         <div className="rounded-lg p-4" style={{ backgroundColor: PANEL, border: `1px solid ${BORDER}` }}>
           <div className="text-sm font-semibold mb-4">Sector Allocation</div>
           {sectors.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie data={sectors} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius={90} innerRadius={50} paddingAngle={2}>
-                  {sectors.map((s, i) => <Cell key={s.id} fill={s.color} />)}
-                </Pie>
-                <Tooltip formatter={(v) => fmtCurrency(v)} contentStyle={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, borderRadius: 6, fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
+            <div style={{ width: '100%', height: 240 }}>
+              <ResponsiveContainer>
+                <PieChart>
+                  {/* isAnimationActive=false: the entry animation never fires when the
+                      chart mounts inside a freshly-shown tab, leaving zero-radius sectors. */}
+                  <Pie data={sectors} dataKey="value" nameKey="label" cx="50%" cy="50%"
+                    outerRadius={90} innerRadius={55} strokeWidth={0} isAnimationActive={false}>
+                    {sectors.map(s => <Cell key={s.id} fill={s.color} />)}
+                  </Pie>
+                  <Tooltip formatter={(v) => fmtCurrency(v)}
+                    contentStyle={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, borderRadius: 6, fontSize: 12 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
           ) : (
             <div className="text-center py-12 text-sm" style={{ color: TEXT_MUTE }}>No positions to display</div>
           )}
@@ -1667,7 +1861,7 @@ function ExposuresTab({ rollup, store, range }) {
                     </div>
                   </td>
                   <td className="py-2 text-right">{fmtCurrency(s.value)}</td>
-                  <td className="py-2 text-right" style={{ color: TEXT_DIM }}>{fmtPct(totalValue ? s.value / totalValue * 100 : 0)}</td>
+                  <td className="py-2 text-right" style={{ color: TEXT_DIM }}>{fmtPct(s.pct)}</td>
                   <td className="py-2 text-right" style={{ color: TEXT_DIM }}>{s.count}</td>
                 </tr>
               ))}
@@ -1675,6 +1869,9 @@ function ExposuresTab({ rollup, store, range }) {
           </table>
         </div>
       </div>
+
+      {/* Capital flow sankey */}
+      <CapitalFlowSankey rollup={rollup} store={store} />
 
       {/* Top 10 concentration */}
       <div className="rounded-lg p-4" style={{ backgroundColor: PANEL, border: `1px solid ${BORDER}` }}>
@@ -1690,18 +1887,15 @@ function ExposuresTab({ rollup, store, range }) {
             </tr>
           </thead>
           <tbody>
-            {rollup.tokens.slice(0, 10).map((t, i) => {
-              const sec = sectorOf(t.sectorId);
-              return (
-                <tr key={t.key} style={{ borderTop: `1px solid ${BORDER}` }}>
-                  <td className="py-2" style={{ color: TEXT_MUTE }}>{i + 1}</td>
-                  <td className="py-2 font-medium">{t.symbol || t.name}</td>
-                  <td className="py-2"><SectorBadge sectorId={t.sectorId} /></td>
-                  <td className="py-2 text-right">{fmtCurrency(t.totalValue)}</td>
-                  <td className="py-2 text-right" style={{ color: TEXT_DIM }}>{fmtPct(totalValue ? t.totalValue / totalValue * 100 : 0)}</td>
-                </tr>
-              );
-            })}
+            {(rollup.tokenRollup || []).slice(0, 10).map((t, i) => (
+              <tr key={t.key} style={{ borderTop: `1px solid ${BORDER}` }}>
+                <td className="py-2" style={{ color: TEXT_MUTE }}>{i + 1}</td>
+                <td className="py-2 font-medium">{t.symbol || t.name}</td>
+                <td className="py-2"><SectorBadge sectorId={t.sectorId} /></td>
+                <td className="py-2 text-right">{fmtCurrency(t.value)}</td>
+                <td className="py-2 text-right" style={{ color: TEXT_DIM }}>{fmtPct(t.pct)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -1714,24 +1908,51 @@ function ExposuresTab({ rollup, store, range }) {
    ============================================================================= */
 function FundEconomicsTab({ rollup, store, selection }) {
   const rows = useMemo(() => {
-    return store.commitments.map(c => {
+    // Only commitments in scope: a client selection narrows to that client's own.
+    const inScope = selection.kind === 'client'
+      ? store.commitments.filter(c => c.clientId === selection.id)
+      : store.commitments;
+
+    // Fund-level marks come straight from the SOI, deliberately NOT from the
+    // client-scaled rollup: this store treats a fund's statement value AS its
+    // called NAV, so a client's pro-rata slice always equals their called
+    // capital exactly and any client-level MOIC collapses to 1.00x. Comparing
+    // the fund's live value against its own statement value is the number that
+    // actually carries information here.
+    // managerBreakdown values carry whatever client-share scaling the rollup applied;
+    // divide it back out so the live mark is on the same full-fund basis as soiNAV.
+    const liveBySoi = Object.fromEntries(
+      (rollup.managerBreakdown || []).map(m => [m.soiId, m._scale ? m.value / m._scale : m.value])
+    );
+
+    return inScope.map(c => {
       const soi = store.soIs.find(s => s.id === c.soiId);
-      const mgr = store.managers.find(m => m.id === c.managerId);
-      const client = store.clients.find(cl => cl.id === c.clientId);
       if (!soi) return null;
+      const mgr = store.managers.find(m => m.id === soi.managerId);
+      const client = store.clients.find(cl => cl.id === c.clientId);
       const snap = latestSnapshot(soi);
-      const positions = snap?.positions || [];
-      const navAtSoi = _.sumBy(positions, p => p.soiMarketValue || 0);
+
       const called = c.called || 0;
       const committed = c.committed || 0;
-      const distributed = c.distributed || 0;
-      const moic = called > 0 ? (navAtSoi + distributed) / called : null;
-      const dpi = called > 0 ? distributed / called : null;
-      const tvpi = called > 0 ? (navAtSoi + distributed) / called : null;
-      const pctCalled = committed > 0 ? called / committed * 100 : null;
-      return { c, soi, mgr, client, navAtSoi, called, committed, distributed, moic, dpi, tvpi, pctCalled, snap };
-    }).filter(Boolean);
-  }, [store, rollup]);
+      const unfunded = Math.max(0, committed - called);
+      const pctCalled = committed > 0 ? (called / committed) * 100 : null;
+
+      // A fund-of-funds holds no direct positions — its value sits in the
+      // commitments it makes to underlying funds.
+      const isFoF = mgr?.type === 'fund_of_funds';
+      const soiNAV = isFoF
+        ? _.sumBy(snap?.subCommitments || [], s => s.called || 0)
+        : _.sumBy(snap?.positions || [], p => p.soiMarketValue || 0);
+
+      // For a FoF the rollup's value is the look-through of every underlying
+      // fund — not comparable to its own commitment-level soiNAV, so leave it blank.
+      const liveNAV = isFoF ? null : (liveBySoi[c.soiId] ?? null);
+      const deltaPct = (soiNAV > 0 && liveNAV != null)
+        ? ((liveNAV - soiNAV) / soiNAV) * 100 : null;
+
+      return { c, soi, mgr, client, called, committed, unfunded, pctCalled, soiNAV, liveNAV, deltaPct, isFoF, snap };
+    }).filter(Boolean).sort((a, b) => b.committed - a.committed);
+  }, [store, rollup.managerBreakdown, selection]);
 
   if (rows.length === 0) {
     return (
@@ -1752,44 +1973,78 @@ function FundEconomicsTab({ rollup, store, selection }) {
               <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>Committed</th>
               <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>Called</th>
               <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>% Called</th>
-              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>NAV (SOI)</th>
-              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>MOIC</th>
-              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>DPI</th>
+              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>Unfunded</th>
+              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>NAV at SOI</th>
+              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>NAV live</th>
+              <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>Δ since SOI</th>
               <th className="text-right px-3 py-2.5" style={{ color: TEXT_MUTE }}>As of</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ c, soi, mgr, navAtSoi, called, committed, distributed, moic, dpi, pctCalled, snap }) => (
+            {rows.map(({ c, soi, mgr, called, committed, unfunded, pctCalled, soiNAV, liveNAV, deltaPct, isFoF, snap }) => (
               <tr key={c.id} style={{ borderTop: `1px solid ${BORDER}` }}>
-                <td className="px-3 py-2.5 font-medium">{soi.fundName || soi.vintage}</td>
+                <td className="px-3 py-2.5 font-medium">
+                  <div className="flex items-center gap-1.5">
+                    {soi.fundName || soi.vintage}
+                    {isFoF && (
+                      <span className="text-[9px] px-1 rounded" style={{ backgroundColor: ACCENT_22, color: ACCENT_2 }}>FoF</span>
+                    )}
+                  </div>
+                </td>
                 <td className="px-3 py-2.5" style={{ color: TEXT_DIM }}>{mgr?.name || '—'}</td>
                 <td className="px-3 py-2.5 text-right">{fmtCurrency(committed)}</td>
                 <td className="px-3 py-2.5 text-right">{fmtCurrency(called)}</td>
                 <td className="px-3 py-2.5 text-right" style={{ color: TEXT_DIM }}>{pctCalled != null ? fmtPct(pctCalled, 0) : '—'}</td>
-                <td className="px-3 py-2.5 text-right">{fmtCurrency(navAtSoi)}</td>
-                <td className="px-3 py-2.5 text-right font-medium" style={{ color: moic != null && moic >= 1 ? GREEN : moic != null ? RED : TEXT_DIM }}>
-                  {fmtMoic(moic)}
+                <td className="px-3 py-2.5 text-right" style={{ color: TEXT_DIM }}>{fmtCurrency(unfunded)}</td>
+                <td className="px-3 py-2.5 text-right" style={{ color: TEXT_DIM }}>{fmtCurrency(soiNAV)}</td>
+                <td className="px-3 py-2.5 text-right">{liveNAV != null ? fmtCurrency(liveNAV) : '—'}</td>
+                <td className="px-3 py-2.5 text-right font-medium"
+                  style={{ color: deltaPct == null ? TEXT_DIM : deltaPct >= 0 ? GREEN : RED }}>
+                  {deltaPct == null ? '—' : fmtPctSigned(deltaPct, 1)}
                 </td>
-                <td className="px-3 py-2.5 text-right" style={{ color: TEXT_DIM }}>{fmtMoic(dpi)}</td>
                 <td className="px-3 py-2.5 text-right" style={{ color: TEXT_MUTE }}>{snap?.asOfDate || '—'}</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
-            <tr style={{ borderTop: `2px solid ${BORDER}`, backgroundColor: PANEL_2 }}>
-              <td className="px-3 py-2.5 font-semibold" colSpan={2}>Total</td>
-              <td className="px-3 py-2.5 text-right font-semibold">{fmtCurrency(_.sumBy(rows, r => r.committed))}</td>
-              <td className="px-3 py-2.5 text-right font-semibold">{fmtCurrency(_.sumBy(rows, r => r.called))}</td>
-              <td className="px-3 py-2.5 text-right" style={{ color: TEXT_DIM }}>
-                {(() => { const tot = _.sumBy(rows, r => r.committed); const cal = _.sumBy(rows, r => r.called); return tot > 0 ? fmtPct(cal/tot*100, 0) : '—'; })()}
-              </td>
-              <td className="px-3 py-2.5 text-right font-semibold">{fmtCurrency(_.sumBy(rows, r => r.navAtSoi))}</td>
-              <td className="px-3 py-2.5 text-right font-semibold" colSpan={3}>
-                {(() => { const called = _.sumBy(rows, r => r.called); const nav = _.sumBy(rows, r => r.navAtSoi); const dist = _.sumBy(rows, r => r.distributed); return called > 0 ? fmtMoic((nav + dist) / called) : '—'; })()}
-              </td>
-            </tr>
+            {(() => {
+              const committed = _.sumBy(rows, 'committed');
+              const called    = _.sumBy(rows, 'called');
+              const unfunded  = _.sumBy(rows, 'unfunded');
+              // FoF NAV is the look-through value of underlying funds that are
+              // already their own rows — summing both would double-count.
+              const direct    = rows.filter(r => !r.isFoF);
+              const soiNAV    = _.sumBy(direct, 'soiNAV');
+              const liveNAV   = _.sumBy(direct, r => r.liveNAV ?? 0);
+              const totDelta  = soiNAV > 0 ? ((liveNAV - soiNAV) / soiNAV) * 100 : null;
+              return (
+                <tr style={{ borderTop: `2px solid ${BORDER}`, backgroundColor: PANEL_2 }}>
+                  <td className="px-3 py-2.5 font-semibold" colSpan={2}>Total</td>
+                  <td className="px-3 py-2.5 text-right font-semibold">{fmtCurrency(committed)}</td>
+                  <td className="px-3 py-2.5 text-right font-semibold">{fmtCurrency(called)}</td>
+                  <td className="px-3 py-2.5 text-right" style={{ color: TEXT_DIM }}>
+                    {committed > 0 ? fmtPct(called / committed * 100, 0) : '—'}
+                  </td>
+                  <td className="px-3 py-2.5 text-right" style={{ color: TEXT_DIM }}>{fmtCurrency(unfunded)}</td>
+                  <td className="px-3 py-2.5 text-right" style={{ color: TEXT_DIM }}>{fmtCurrency(soiNAV)}</td>
+                  <td className="px-3 py-2.5 text-right font-semibold">{fmtCurrency(liveNAV)}</td>
+                  <td className="px-3 py-2.5 text-right font-semibold"
+                    style={{ color: totDelta == null ? TEXT_DIM : totDelta >= 0 ? GREEN : RED }}>
+                    {totDelta == null ? '—' : fmtPctSigned(totDelta, 1)}
+                  </td>
+                  <td />
+                </tr>
+              );
+            })()}
           </tfoot>
         </table>
+      </div>
+      <div className="text-[10px] leading-relaxed" style={{ color: TEXT_MUTE }}>
+        Committed / Called / Unfunded are commitment-level figures. NAV at SOI is the fund's stated
+        value on its statement date; NAV live re-prices those same holdings at current market prices,
+        so Δ since SOI is the fund's move since the statement — not a client-level return.
+        NAV totals exclude fund-of-funds rows, whose look-through value is already counted in the
+        underlying funds listed above.
       </div>
     </div>
   );

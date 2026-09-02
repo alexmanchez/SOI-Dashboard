@@ -44,3 +44,42 @@ html, body {
 }
 
 code { font-family: ui-monospace, monospace; }
+
+/* Chart skeleton shimmer — a soft highlight travelling left→right while data loads */
+@keyframes catena-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.catena-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.catena-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgb(var(--catena-accent) / 0.10) 40%,
+    rgb(var(--catena-accent) / 0.18) 50%,
+    rgb(var(--catena-accent) / 0.10) 60%,
+    transparent 100%
+  );
+  animation: catena-shimmer 1.8s ease-in-out infinite;
+}
+
+/* Pulsing skeleton bars inside the shimmer frame */
+@keyframes catena-pulse {
+  0%, 100% { opacity: 0.28; }
+  50%      { opacity: 0.55; }
+}
+
+.catena-pulse { animation: catena-pulse 2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .catena-shimmer::after, .catena-pulse { animation: none; }
+}
