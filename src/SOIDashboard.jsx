@@ -2206,7 +2206,9 @@ function ExposuresTab({ rollup, store, range }) {
                     {sectors.map(s => <Cell key={s.id} fill={s.color} />)}
                   </Pie>
                   <Tooltip formatter={(v) => fmtCurrency(v)}
-                    contentStyle={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, borderRadius: 6, fontSize: 12 }} />
+                    contentStyle={{ backgroundColor: PANEL_2, border: `1px solid ${BORDER}`, borderRadius: 6, fontSize: 12 }}
+                    labelStyle={{ color: TEXT_DIM }}
+                    itemStyle={{ color: TEXT }} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
